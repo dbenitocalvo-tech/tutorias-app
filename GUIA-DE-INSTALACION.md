@@ -71,6 +71,11 @@ Node.js es el programa que hace funcionar la app. Se instala una sola vez.
    Presiona Enter y espera (puede tardar 1-3 minutos; aparecerá mucho texto,
    es normal). Cuando termine y vuelva a aparecer la línea para escribir, sigue.
 
+5. Crea el archivo de configuración: copia `.env.example` y renómbralo a
+   `.env` (en la misma carpeta). Ábrelo con el Bloc de notas y pon ahí la
+   URL y la "anon key" de tu proyecto de Supabase (Project Settings → API
+   en supabase.com). Sin este archivo la app no arranca.
+
 ---
 
 ## PASO 4 — Arrancar la app en tu computadora
@@ -114,15 +119,18 @@ La forma más sencilla es con **Vercel**:
      botón "Add file" → "Upload files" donde puedes arrastrar la carpeta).
    - En Vercel, elige "Add New Project", conecta tu GitHub y selecciona ese
      repositorio.
-3. Vercel detecta solo que es un proyecto Vite. Deja todo como viene y presiona
-   **Deploy**.
-4. En 1-2 minutos te dará una dirección pública (por ejemplo
-   `https://tutorias-tuusuario.vercel.app`). Esa es la que compartes con tus
-   tutores.
+3. Vercel detecta solo que es un proyecto Vite. Antes de presionar "Deploy",
+   abre la sección **Environment Variables** y agrega estas dos (los mismos
+   valores que pusiste en tu archivo `.env`):
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+4. Presiona **Deploy**. En 1-2 minutos te dará una dirección pública (por
+   ejemplo `https://tutorias-tuusuario.vercel.app`). Esa es la que compartes
+   con tus tutores.
 
-> Nota: la llave pública de Supabase ya viene incluida en el proyecto, así que
-> la app publicada se conecta sola a tu base de datos. No tienes que configurar
-> nada más en Vercel.
+> Nota: si más adelante cambias la URL o la "anon key" en Supabase, recuerda
+> actualizar también estas dos variables en Vercel (Project Settings →
+> Environment Variables) y volver a desplegar.
 
 ---
 
@@ -152,8 +160,10 @@ La forma más sencilla es con **Vercel**:
 - **"npm no se reconoce" / "command not found":** Node.js no quedó instalado o
   hay que cerrar y volver a abrir la ventana de comandos. Repite el Paso 2.
 - **La app abre pero dice "No se pudo conectar":** revisa que corriste el SQL
-  del Paso 1, y que el archivo `src/config.js` tiene tu URL y tu llave (ya
-  vienen puestas).
+  del Paso 1, y que tu archivo `.env` tiene tu URL y tu "anon key" correctas.
+- **Pantalla en blanco con un error de "Faltan las variables de entorno":**
+  no creaste el archivo `.env` (Paso 3.5) o lo creaste con otro nombre. Tiene
+  que llamarse exactamente `.env`.
 - **Pantalla en blanco:** abre la consola del navegador (tecla F12, pestaña
   "Console") y cópiame el mensaje de error; con eso lo resolvemos.
 
