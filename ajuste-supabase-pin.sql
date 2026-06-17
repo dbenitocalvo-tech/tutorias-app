@@ -26,6 +26,10 @@ create policy app_estado_acceso on app_estado
   using (true)
   with check (true);
 
+-- 3. Permisos: los roles anon/authenticated necesitan permiso de
+--    tabla además de la política RLS para poder leer y escribir.
+grant select, insert, update, delete on table app_estado to anon, authenticated;
+
 -- ============================================================
 --  Si todo salió bien verás "Success. No rows returned".
 --  En "Table Editor" debe aparecer la tabla app_estado.

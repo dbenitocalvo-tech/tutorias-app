@@ -1400,8 +1400,10 @@ function FormSesion({ org, tutorId, alumnosDisponibles, onRegistrar, mostrarTuto
     if (!ok) return;
     const alumno = org.alumnos.find((a) => a.id === f.alumnoId);
     const enLinea = f.modalidad === LINEA;
-    const cobro = rel ? (enLinea ? rel.cobroLin : rel.cobroPres) : 0;
-    const pago = rel ? (enLinea ? rel.pagoLin : rel.pagoPres) : 0;
+    const horas = dur / 60;
+    const r2 = (x) => Math.round(x * 100) / 100;
+    const cobro = rel ? r2((enLinea ? rel.cobroLin : rel.cobroPres) * horas) : 0;
+    const pago = rel ? r2((enLinea ? rel.pagoLin : rel.pagoPres) * horas) : 0;
     onRegistrar({ id: uid(), tutorId, alumnoId: f.alumnoId, materia: f.materia, fecha: f.fecha, duracion: dur, modalidad: f.modalidad, notas: f.notas.trim(), cobro, pago, moneda: (alumno?.moneda || "Q"), registradoPor, subidaEn: Date.now() });
     setF(blank);
   };
@@ -1450,13 +1452,15 @@ function EditorSesion({ sesion, alumnos, relacionesTutor, materias = [], onGuard
 
   const guardar = () => {
     if (!ok) return;
-    const cambioMontos = f.alumnoId !== sesion.alumnoId || f.modalidad !== sesion.modalidad;
+    const cambioMontos = f.alumnoId !== sesion.alumnoId || f.modalidad !== sesion.modalidad || dur !== sesion.duracion;
     let cobro = sesion.cobro, pago = sesion.pago;
     if (cambioMontos) {
       const rel = relacionesTutor.find((r) => r.alumnoId === f.alumnoId);
       const enLin = f.modalidad === LINEA;
-      cobro = rel ? (enLin ? rel.cobroLin : rel.cobroPres) : 0;
-      pago = rel ? (enLin ? rel.pagoLin : rel.pagoPres) : 0;
+      const horas = dur / 60;
+      const r2 = (x) => Math.round(x * 100) / 100;
+      cobro = rel ? r2((enLin ? rel.cobroLin : rel.cobroPres) * horas) : 0;
+      pago = rel ? r2((enLin ? rel.pagoLin : rel.pagoPres) * horas) : 0;
     }
     const nuevaMon = (alumnos.find((a) => a.id === f.alumnoId)?.moneda) || sesion.moneda || "Q";
     onGuardar({ ...sesion, alumnoId: f.alumnoId, materia: f.materia, fecha: f.fecha, duracion: dur, modalidad: f.modalidad, notas: f.notas.trim(), cobro, pago, moneda: nuevaMon });
