@@ -1404,6 +1404,7 @@ function FormSesion({ org, tutorId, alumnosDisponibles, onRegistrar, mostrarTuto
     const r2 = (x) => Math.round(x * 100) / 100;
     const cobro = rel ? r2((enLinea ? rel.cobroLin : rel.cobroPres) * horas) : 0;
     const pago = rel ? r2((enLinea ? rel.pagoLin : rel.pagoPres) * horas) : 0;
+    console.log("[enviar] f.horas:", f.horas, "f.minutos:", f.minutos, "dur:", dur, "horas:", horas, "rel:", rel, "cobro:", cobro, "pago:", pago);
     onRegistrar({ id: uid(), tutorId, alumnoId: f.alumnoId, materia: f.materia, fecha: f.fecha, duracion: dur, modalidad: f.modalidad, notas: f.notas.trim(), cobro, pago, moneda: (alumno?.moneda || "Q"), registradoPor, subidaEn: Date.now() });
     setF(blank);
   };
