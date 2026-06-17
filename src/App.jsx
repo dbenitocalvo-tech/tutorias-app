@@ -1,16 +1,14 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { supabase } from "./supabaseClient";
 
 /* ================================================================== *
- *  Registro de Tutorías — producción (Supabase + login por PIN)
- *  Todo el estado de la organización se guarda en la nube (tabla
- *  app_estado, una fila JSON). El login con PIN se valida dentro de
- *  la app; la sesión y las notificaciones leídas se guardan local.
+ *  Registro de Tutorías — versión de prueba (datos en el navegador)
+ *  Esta versión guarda todo localmente para probar dentro de Claude.
+ *  La versión de producción usa Supabase; esta es solo para probar.
  * ================================================================== */
 
-const ESTADO_ID = "singleton";          // fila única con todo el estado
-const SESSION_KEY = "tutorias-sesion";  // login actual (local, por dispositivo)
-const READ_KEY = "tutorias-leidas";     // avisos vistos (local)
+const ORG_KEY = "tutorias-org-v15";
+const SESSION_KEY = "tutorias-sesion-v15";
+const READ_KEY = "tutorias-leidas-v15";
 const PRES = "Presencial";
 const LINEA = "En línea";
 
@@ -317,16 +315,11 @@ export default function App() {
   const showToast = useCallback((m) => { setToast(m); setTimeout(() => setToast(null), 2600); }, []);
 
   const cargar = useCallback(async () => {
-    // Estado de la organización: desde Supabase (nube)
-    try {
-      const { data } = await supabase.from("app_estado").select("data").eq("id", ESTADO_ID).maybeSingle();
-      if (data?.data) setOrg({ ...emptyOrg(), ...data.data });
-    } catch { showToast("No se pudo conectar con la base de datos."); }
-    // Sesión actual y avisos leídos: locales en este dispositivo
-    try { const s = localStorage.getItem(SESSION_KEY); if (s) setSesion(JSON.parse(s)); } catch {}
-    try { const r = localStorage.getItem(READ_KEY); if (r) setLeidas(JSON.parse(r)); } catch {}
+    try { const r = await window.storage.get(ORG_KEY, true); if (r) setOrg({ ...emptyOrg(), ...JSON.parse(r.value) }); } catch {}
+    try { const r = await window.storage.get(SESSION_KEY, false); if (r) setSesion(JSON.parse(r.value)); } catch {}
+    try { const r = await window.storage.get(READ_KEY, false); if (r) setLeidas(JSON.parse(r.value)); } catch {}
     setCargando(false);
-  }, [showToast]);
+  }, []);
   useEffect(() => { cargar(); }, [cargar]);
 
   const guardarOrg = useCallback(async (next, accion) => {
@@ -340,20 +333,15 @@ export default function App() {
       final = { ...next, auditoria: [entrada, ...(next.auditoria || [])].slice(0, 1000) };
     }
     setOrg(final);
-    try {
-      const { error } = await supabase.from("app_estado").upsert({ id: ESTADO_ID, data: final, actualizado_en: new Date().toISOString() });
-      if (error) showToast("No se pudo guardar en la nube.");
-    } catch { showToast("Sin conexión: el cambio no se guardó."); }
+    try { await window.storage.set(ORG_KEY, JSON.stringify(final), true); } catch { showToast("No se pudo guardar."); }
   }, [showToast, sesion, org]);
-  const iniciarSesion = useCallback(async (s) => { setSesion(s); try { localStorage.setItem(SESSION_KEY, JSON.stringify(s)); } catch {} }, []);
-  const cerrarSesion = useCallback(async () => { setSesion(null); try { localStorage.removeItem(SESSION_KEY); } catch {} }, []);
-  const marcarLeidas = useCallback(async () => { const ids = org.sesiones.map((x) => x.id); setLeidas(ids); try { localStorage.setItem(READ_KEY, JSON.stringify(ids)); } catch {} }, [org.sesiones]);
+  const iniciarSesion = useCallback(async (s) => { setSesion(s); try { await window.storage.set(SESSION_KEY, JSON.stringify(s), false); } catch {} }, []);
+  const cerrarSesion = useCallback(async () => { setSesion(null); try { await window.storage.set(SESSION_KEY, JSON.stringify(null), false); } catch {} }, []);
+  const marcarLeidas = useCallback(async () => { const ids = org.sesiones.map((x) => x.id); setLeidas(ids); try { await window.storage.set(READ_KEY, JSON.stringify(ids), false); } catch {} }, [org.sesiones]);
 
   useEffect(() => {
     if (sesion?.tipo !== "coordinador") return;
-    const t = setInterval(async () => {
-      try { const { data } = await supabase.from("app_estado").select("data").eq("id", ESTADO_ID).maybeSingle(); if (data?.data) setOrg({ ...emptyOrg(), ...data.data }); } catch {}
-    }, 8000);
+    const t = setInterval(async () => { try { const r = await window.storage.get(ORG_KEY, true); if (r) setOrg({ ...emptyOrg(), ...JSON.parse(r.value) }); } catch {} }, 8000);
     return () => clearInterval(t);
   }, [sesion]);
 
@@ -408,7 +396,7 @@ function SetupCoordinador({ onCrear }) {
       <div className="tut-field tut-pin" style={{ marginTop: 12 }}><label>Repite el código</label><PinInput value={p2} onChange={setP2} /></div>
       {err && <div className="tut-err">{err}</div>}
       <div className="tut-actions"><button className="tut-btn" disabled={!ok} onClick={() => onCrear({ usuario: u.trim(), pin: p })}>Crear cuenta</button></div>
-      <div className="hint">En este prototipo el código se guarda en el navegador, así que no metas datos reales sensibles hasta publicar la versión con base de datos.</div>
+      <div className="hint">Versión de prueba: los datos se guardan en este navegador. Elige un código de 4 dígitos que recuerdes; con él entrarás como coordinador.</div>
     </div>
   );
 }
@@ -1189,13 +1177,13 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
         <div className="tut-twocol">
           <div>
             <div className="tut-sumrow"><span>Saldo guardado (inicial)</span>
-              <input className="money" inputMode="decimal" value={conc.guardado || 0} onChange={(e) => setConc("guardado", e.target.value.replace(/[^\d.]/g, ""))}
+              <MoneyInput value={conc.guardado || 0} onCommit={(v) => setConc("guardado", v)}
                 style={{ width: 120, fontFamily: "Space Grotesk", textAlign: "right", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 9px" }} /></div>
             <div className="tut-sumrow"><span>+ Cobrado a alumnos (Q)</span><span className="amt" style={{ color: "var(--pos)" }}>{fmtQ(cobradoQ)}</span></div>
             <div className="tut-sumrow"><span>− Pagado a tutores (Q)</span><span className="amt" style={{ color: "var(--neg)" }}>{fmtQ(pagadoTutores)}</span></div>
             <div className="tut-sumrow"><b>= Deberías tener</b><span className="amt">{fmtQ(esperado)}</span></div>
             <div className="tut-sumrow"><span>Saldo real en banco</span>
-              <input className="money" inputMode="decimal" value={conc.banco || 0} onChange={(e) => setConc("banco", e.target.value.replace(/[^\d.]/g, ""))}
+              <MoneyInput value={conc.banco || 0} onCommit={(v) => setConc("banco", v)}
                 style={{ width: 120, fontFamily: "Space Grotesk", textAlign: "right", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 9px" }} /></div>
             <div className="tut-sumrow" style={{ marginTop: 4 }}>
               <b>{cuadra ? "Cuadra" : "Descuadre"}</b>
