@@ -1,10 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-
-/* ================================================================== *
- *  Registro de Tutorías — versión de prueba (datos en el navegador)
- *  Esta versión guarda todo localmente para probar dentro de Claude.
- *  La versión de producción usa Supabase; esta es solo para probar.
- * ================================================================== */
+import { supabase } from "./supabaseClient";
 
 const ORG_KEY = "tutorias-org-v15";
 const SESSION_KEY = "tutorias-sesion-v15";
@@ -305,6 +300,27 @@ function TrioMontos({ pago, cobro, onChange }) {
   );
 }
 
+/* ------------------------------ Debug banner ------------------------------- */
+const VITE_URL = import.meta.env.VITE_SUPABASE_URL;
+const VITE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+function DebugBanner({ dbError, onDismiss }) {
+  const missingUrl = !VITE_URL;
+  const missingKey = !VITE_KEY;
+  const hasEnvProblem = missingUrl || missingKey;
+  if (!hasEnvProblem && !dbError) return null;
+  return (
+    <div style={{ background: "#B91C1C", color: "#fff", padding: "14px 18px", borderRadius: 12, marginBottom: 16, fontSize: 13.5, lineHeight: 1.6 }}>
+      <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 15 }}>⚠ Error de conexión con Supabase</div>
+      {missingUrl && <div><b>VITE_SUPABASE_URL</b> no está definida en el entorno de build.</div>}
+      {missingKey && <div><b>VITE_SUPABASE_ANON_KEY</b> no está definida en el entorno de build.</div>}
+      {!hasEnvProblem && <div>Variables de entorno detectadas — URL: <code style={{ background: "rgba(0,0,0,.3)", padding: "1px 5px", borderRadius: 4 }}>{VITE_URL?.slice(0, 40)}…</code></div>}
+      {dbError && <div style={{ marginTop: 6 }}><b>Error Supabase:</b> {dbError}</div>}
+      {onDismiss && <button onClick={onDismiss} style={{ marginTop: 10, background: "rgba(255,255,255,.2)", border: "none", color: "#fff", borderRadius: 7, padding: "5px 12px", cursor: "pointer", fontWeight: 600 }}>Cerrar</button>}
+    </div>
+  );
+}
+
 /* ------------------------------ App ------------------------------- */
 export default function App() {
   const [org, setOrg] = useState(emptyOrg());
@@ -312,12 +328,25 @@ export default function App() {
   const [leidas, setLeidas] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [toast, setToast] = useState(null);
+  const [dbError, setDbError] = useState(null);
   const showToast = useCallback((m) => { setToast(m); setTimeout(() => setToast(null), 2600); }, []);
 
   const cargar = useCallback(async () => {
-    try { const r = await window.storage.get(ORG_KEY, true); if (r) setOrg({ ...emptyOrg(), ...JSON.parse(r.value) }); } catch {}
-    try { const r = await window.storage.get(SESSION_KEY, false); if (r) setSesion(JSON.parse(r.value)); } catch {}
-    try { const r = await window.storage.get(READ_KEY, false); if (r) setLeidas(JSON.parse(r.value)); } catch {}
+    try {
+      const { data, error } = await supabase.from("app_estado").select("data").eq("id", "singleton").single();
+      if (error) {
+        console.error("[supabase] cargar error:", error);
+        if (error.code !== "PGRST116") setDbError(error.message + " (code: " + error.code + ")");
+      } else {
+        setDbError(null);
+        if (data?.data) setOrg({ ...emptyOrg(), ...data.data });
+      }
+    } catch (e) {
+      console.error("[supabase] cargar exception:", e);
+      setDbError(String(e?.message || e));
+    }
+    try { const v = localStorage.getItem(SESSION_KEY); if (v) setSesion(JSON.parse(v)); } catch {}
+    try { const v = localStorage.getItem(READ_KEY); if (v) setLeidas(JSON.parse(v)); } catch {}
     setCargando(false);
   }, []);
   useEffect(() => { cargar(); }, [cargar]);
@@ -333,30 +362,57 @@ export default function App() {
       final = { ...next, auditoria: [entrada, ...(next.auditoria || [])].slice(0, 1000) };
     }
     setOrg(final);
-    try { await window.storage.set(ORG_KEY, JSON.stringify(final), true); } catch { showToast("No se pudo guardar."); }
+    try {
+      const { error } = await supabase.from("app_estado").upsert({ id: "singleton", data: final, actualizado_en: new Date().toISOString() });
+      if (error) {
+        console.error("[supabase] guardar error:", error);
+        setDbError(error.message + " (code: " + error.code + ")");
+        showToast("No se pudo guardar: " + error.message);
+      } else {
+        setDbError(null);
+      }
+    } catch (e) {
+      console.error("[supabase] guardar exception:", e);
+      setDbError(String(e?.message || e));
+      showToast("No se pudo guardar.");
+    }
   }, [showToast, sesion, org]);
-  const iniciarSesion = useCallback(async (s) => { setSesion(s); try { await window.storage.set(SESSION_KEY, JSON.stringify(s), false); } catch {} }, []);
-  const cerrarSesion = useCallback(async () => { setSesion(null); try { await window.storage.set(SESSION_KEY, JSON.stringify(null), false); } catch {} }, []);
-  const marcarLeidas = useCallback(async () => { const ids = org.sesiones.map((x) => x.id); setLeidas(ids); try { await window.storage.set(READ_KEY, JSON.stringify(ids), false); } catch {} }, [org.sesiones]);
+  const iniciarSesion = useCallback(async (s) => { setSesion(s); try { localStorage.setItem(SESSION_KEY, JSON.stringify(s)); } catch {} }, []);
+  const cerrarSesion = useCallback(async () => { setSesion(null); try { localStorage.setItem(SESSION_KEY, JSON.stringify(null)); } catch {} }, []);
+  const marcarLeidas = useCallback(async () => { const ids = org.sesiones.map((x) => x.id); setLeidas(ids); try { localStorage.setItem(READ_KEY, JSON.stringify(ids)); } catch {} }, [org.sesiones]);
 
   useEffect(() => {
     if (sesion?.tipo !== "coordinador") return;
-    const t = setInterval(async () => { try { const r = await window.storage.get(ORG_KEY, true); if (r) setOrg({ ...emptyOrg(), ...JSON.parse(r.value) }); } catch {} }, 8000);
+    const t = setInterval(async () => {
+      try {
+        const { data } = await supabase.from("app_estado").select("data").eq("id", "singleton").single();
+        if (data?.data) setOrg({ ...emptyOrg(), ...data.data });
+      } catch {}
+    }, 8000);
     return () => clearInterval(t);
   }, [sesion]);
 
   const noLeidas = useMemo(() => org.sesiones.filter((x) => !leidas.includes(x.id)), [org.sesiones, leidas]);
 
-  if (cargando) return <div className="tut-app"><Styles /><div className="tut-wrap"><div className="tut-card"><div className="tut-empty">Cargando…</div></div></div></div>;
+  if (cargando) return (
+    <div className="tut-app"><Styles /><div className="tut-wrap">
+      <DebugBanner dbError={dbError} />
+      <div className="tut-card"><div className="tut-empty">Cargando…</div></div>
+    </div></div>
+  );
 
   if (!org.coordinador) return (
     <div className="tut-app"><Styles /><div className="tut-wrap">
+      <DebugBanner dbError={dbError} onDismiss={() => setDbError(null)} />
       <SetupCoordinador onCrear={(c) => { guardarOrg({ ...org, coordinador: c }); showToast("Cuenta de coordinador creada."); }} />
     </div>{toast && <div className="tut-toast"><span className="dot" />{toast}</div>}</div>
   );
 
   if (!sesion) return (
-    <div className="tut-app"><Styles /><div className="tut-wrap"><Login org={org} onEntrar={iniciarSesion} /></div>{toast && <div className="tut-toast"><span className="dot" />{toast}</div>}</div>
+    <div className="tut-app"><Styles /><div className="tut-wrap">
+      <DebugBanner dbError={dbError} onDismiss={() => setDbError(null)} />
+      <Login org={org} onEntrar={iniciarSesion} />
+    </div>{toast && <div className="tut-toast"><span className="dot" />{toast}</div>}</div>
   );
 
   const tutorActual = sesion.tipo === "tutor" ? org.tutores.find((t) => t.id === sesion.tutorId) : null;
@@ -364,6 +420,7 @@ export default function App() {
 
   return (
     <div className="tut-app"><Styles /><div className="tut-wrap">
+      <DebugBanner dbError={dbError} onDismiss={() => setDbError(null)} />
       <header className="tut-top">
         <div className="tut-brand">
           <div className="tut-logo">T</div>
