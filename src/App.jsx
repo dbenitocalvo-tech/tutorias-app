@@ -1179,8 +1179,10 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
     const recibido = movs.reduce((x, c) => x + (c.monto || 0), 0);
     return { id: a.id, nombre: a.nombre, moneda: mon, generado: facturado, pagado: recibido, movs };
   };
-  const alumnosQ = org.alumnos.filter((a) => (a.moneda || "Q") === "Q").map(filaAlumno);
-  const alumnosUSD = org.alumnos.filter((a) => a.moneda === "USD").map(filaAlumno);
+  const [soloDeudores, setSoloDeudores] = useState(false);
+  const sortSaldo = (arr) => [...arr].sort((a, b) => (b.generado - b.pagado) - (a.generado - a.pagado));
+  const alumnosQ = sortSaldo(org.alumnos.filter((a) => (a.moneda || "Q") === "Q").map(filaAlumno)).filter((f) => !soloDeudores || f.generado - f.pagado > 0.005);
+  const alumnosUSD = sortSaldo(org.alumnos.filter((a) => a.moneda === "USD").map(filaAlumno)).filter((f) => !soloDeudores || f.generado - f.pagado > 0.005);
 
   // --- TUTORES: separar el devengado según la moneda del alumno de cada sesión ---
   const filasTutoresQ = org.tutores.map((t) => {
@@ -1260,9 +1262,14 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
         {/* Columna izquierda: cobros de alumnos */}
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <div className="tut-card">
-            <h2>Cobros de alumnos (Q)</h2>
-            <p className="sub">Lo facturado menos lo que te han pagado. Registra cada pago con su fecha.</p>
-            {alumnosQ.length === 0 ? <div className="tut-empty">Ninguno todavía.</div> : (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 4 }}>
+              <h2 style={{ margin: 0 }}>Cobros de alumnos (Q)</h2>
+              <button className={`tut-btn sm ${soloDeudores ? "" : "ghost"}`} onClick={() => setSoloDeudores((v) => !v)}>
+                {soloDeudores ? "Solo deudores" : "Todos"}
+              </button>
+            </div>
+            <p className="sub">Ordenado por saldo pendiente. Registra cada pago con su fecha.</p>
+            {alumnosQ.length === 0 ? <div className="tut-empty">{soloDeudores ? "Nadie debe nada." : "Ninguno todavía."}</div> : (
               <div className="tut-list">{alumnosQ.map((f) => (
                 <FilaCuenta key={f.id} fila={f} modo="alumnos" mon="Q"
                   onRegistrar={(monto, fecha, nota) => { agregarMov("cobros", { id: uid(), alumnoId: f.id, monto, fecha, nota, moneda: "Q" }); showToast("Pago del alumno registrado."); }}
