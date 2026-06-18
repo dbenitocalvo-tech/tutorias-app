@@ -563,7 +563,8 @@ function TabTutores({ org, guardarOrg, showToast }) {
   const libre = nombre.trim() && nombre.trim().toLowerCase() !== org.coordinador.usuario.toLowerCase() && !org.tutores.some((t) => t.nombre.toLowerCase() === nombre.trim().toLowerCase());
   const ok = libre && pinOk(pin);
   const crear = () => { if (!ok) return; guardarOrg({ ...org, tutores: [...org.tutores, { id: uid(), nombre: nombre.trim(), pin, genero }] }, "creó tutor"); setNombre(""); setPin(""); setGenero("M"); showToast("Tutor agregado."); };
-  const eliminar = (id) => guardarOrg({ ...org, tutores: org.tutores.filter((t) => t.id !== id), relaciones: org.relaciones.filter((r) => r.tutorId !== id) }, "eliminó tutor");
+  const eliminar = (id) => guardarOrg({ ...org, tutores: org.tutores.filter((t) => t.id !== id), relaciones: org.relaciones.filter((r) => r.tutorId !== id), personalTutorId: org.personalTutorId === id ? null : org.personalTutorId }, "eliminó tutor");
+  const togglePersonal = (id) => guardarOrg({ ...org, personalTutorId: org.personalTutorId === id ? null : id }, "cambió tutor personal");
   return (
     <>
       <div className="tut-card">
@@ -579,19 +580,21 @@ function TabTutores({ org, guardarOrg, showToast }) {
       </div>
       <div className="tut-card">
         <h2>Tutores ({org.tutores.length})</h2>
-        <p className="sub">Toca "Ver clases" para el detalle de a qué alumno le dio, qué día, cuántas horas y los comentarios.</p>
+        <p className="sub">Toca "Ver clases" para el detalle. Marca un tutor como "Cuenta personal" si eres tú mismo dando clases: sus ingresos se rastrean por separado y no afectan la ganancia de la empresa.</p>
         {org.tutores.length === 0 ? <div className="tut-empty">Aún no hay tutores.</div> : (
           <div className="tut-list">
             {org.tutores.map((t) => {
+              const esPersonal = org.personalTutorId === t.id;
               const ses = org.sesiones.filter((s) => s.tutorId === t.id);
               const pagado = ses.reduce((a, s) => a + (s.pago || 0), 0);
               const nrel = org.relaciones.filter((r) => r.tutorId === t.id).length;
               return (
                 <div className="tut-item" key={t.id}>
                   <div className="tut-item-row">
-                    <div><div className="name">{t.nombre}</div>
-                      <div className="meta">Código: <b>{t.pin}</b> · {nrel} alumno(s) asignado(s) · {ses.length} clase(s) · pagado <b>{fmtQ(pagado)}</b></div></div>
-                    <div style={{ display: "flex", gap: 6 }}>
+                    <div><div className="name">{t.nombre}{esPersonal && <span className="tut-newtag" style={{ color: "var(--accent)", marginLeft: 8 }}>CUENTA PERSONAL</span>}</div>
+                      <div className="meta">Código: <b>{t.pin}</b> · {nrel} alumno(s) · {ses.length} clase(s) · {esPersonal ? "generado personal" : "pagado"} <b>{fmtQ(pagado)}</b></div></div>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                      <button className={`tut-btn sm ${esPersonal ? "" : "ghost"}`} style={esPersonal ? { background: "var(--accent)" } : {}} onClick={() => togglePersonal(t.id)}>{esPersonal ? "Personal ✓" : "Marcar personal"}</button>
                       <button className="tut-btn ghost sm" onClick={() => setVerId(verId === t.id ? null : t.id)}>{verId === t.id ? "Ocultar" : "Ver clases"}</button>
                       <BotonConfirma onConfirm={() => eliminar(t.id)} />
                     </div>
@@ -829,15 +832,20 @@ function TabDinero({ org, guardarOrg, noLeidas, onMarcarLeidas, mes, showToast }
   const horasFiltradas = filtradas.reduce((a, s) => a + (s.duracion || 0), 0);
 
   const monS = (s) => s.moneda || "Q";
-  const minTotal = sesionesMes.filter((s) => monS(s) === "Q").reduce((a, s) => a + (s.duracion || 0), 0);
-  const ingresosQ = sesionesMes.filter((s) => monS(s) === "Q").reduce((a, s) => a + (s.cobro || 0), 0);
-  const ingresosUSD = sesionesMes.filter((s) => monS(s) === "USD").reduce((a, s) => a + (s.cobro || 0), 0);
-  const pagosQ = sesionesMes.filter((s) => monS(s) === "Q").reduce((a, s) => a + (s.pago || 0), 0);
+  const pid = org.personalTutorId || null;
+  const esP = (s) => pid && s.tutorId === pid;
+  const sesionesMesEmpresa = sesionesMes.filter((s) => !esP(s));
+  const minTotal = sesionesMesEmpresa.filter((s) => monS(s) === "Q").reduce((a, s) => a + (s.duracion || 0), 0);
+  const ingresosQ = sesionesMesEmpresa.filter((s) => monS(s) === "Q").reduce((a, s) => a + (s.cobro || 0), 0);
+  const ingresosUSD = sesionesMesEmpresa.filter((s) => monS(s) === "USD").reduce((a, s) => a + (s.cobro || 0), 0);
+  const pagosQ = sesionesMesEmpresa.filter((s) => monS(s) === "Q").reduce((a, s) => a + (s.pago || 0), 0);
   const gananciaQ = ingresosQ - pagosQ;
-  const hayUSD = sesionesMes.some((s) => monS(s) === "USD");
+  const hayUSD = sesionesMesEmpresa.some((s) => monS(s) === "USD");
+  const dineroDiegoQ = pid ? sesionesMes.filter((s) => esP(s) && monS(s) === "Q").reduce((a, s) => a + (s.cobro || 0), 0) : 0;
+  const nombrePersonal = pid ? (org.tutores.find((t) => t.id === pid)?.nombre || "Personal") : "";
 
-  const porAlumno = useMemo(() => org.alumnos.map((a) => { const ss = sesionesMes.filter((s) => s.alumnoId === a.id); return { nombre: a.nombre, moneda: a.moneda || "Q", total: ss.reduce((x, s) => x + (s.cobro || 0), 0), min: ss.reduce((x, s) => x + s.duracion, 0), n: ss.length }; }).filter((x) => x.n > 0).sort((x, y) => y.total - x.total), [org.alumnos, sesionesMes]);
-  const porTutor = useMemo(() => org.tutores.map((t) => { const ss = sesionesMes.filter((s) => s.tutorId === t.id); return { nombre: t.nombre, total: ss.reduce((x, s) => x + (s.pago || 0), 0), min: ss.reduce((x, s) => x + s.duracion, 0), n: ss.length }; }).filter((x) => x.n > 0).sort((x, y) => y.total - x.total), [org.tutores, sesionesMes]);
+  const porAlumno = useMemo(() => org.alumnos.map((a) => { const ss = sesionesMesEmpresa.filter((s) => s.alumnoId === a.id); return { nombre: a.nombre, moneda: a.moneda || "Q", total: ss.reduce((x, s) => x + (s.cobro || 0), 0), min: ss.reduce((x, s) => x + s.duracion, 0), n: ss.length }; }).filter((x) => x.n > 0).sort((x, y) => y.total - x.total), [org.alumnos, sesionesMesEmpresa]);
+  const porTutor = useMemo(() => org.tutores.filter((t) => t.id !== pid).map((t) => { const ss = sesionesMes.filter((s) => s.tutorId === t.id); return { nombre: t.nombre, total: ss.reduce((x, s) => x + (s.pago || 0), 0), min: ss.reduce((x, s) => x + s.duracion, 0), n: ss.length }; }).filter((x) => x.n > 0).sort((x, y) => y.total - x.total), [org.tutores, sesionesMes, pid]);
 
   const periodo = fmtPeriodo(mes);
 
@@ -848,8 +856,9 @@ function TabDinero({ org, guardarOrg, noLeidas, onMarcarLeidas, mes, showToast }
         <div className="tut-stat"><div className="v">{(minTotal / 60).toFixed(1)}</div><div className="l">Horas dadas (solo Q)</div></div>
         <div className="tut-stat"><div className="v">{fmtQ(ingresosQ)}</div><div className="l">Ingresos en Q</div></div>
         <div className="tut-stat"><div className="v">{fmtQ(pagosQ)}</div><div className="l">Pagos a tutores (Q)</div></div>
-        <div className="tut-stat"><div className={`v ${gananciaQ >= 0 ? "pos" : "neg"}`}>{fmtQ(gananciaQ)}</div><div className="l">Ganancia en Q</div></div>
+        <div className="tut-stat"><div className={`v ${gananciaQ >= 0 ? "pos" : "neg"}`}>{fmtQ(gananciaQ)}</div><div className="l">Ganancia empresa (Q)</div></div>
         <div className="tut-stat"><div className="v">{fmtMon(ingresosUSD, "USD")}</div><div className="l">Ingresos en US$</div></div>
+        {pid && <div className="tut-stat"><div className="v" style={{ color: "var(--accent)" }}>{fmtQ(dineroDiegoQ)}</div><div className="l">Dinero personal · {nombrePersonal}</div></div>}
       </div>
 
       <div className="tut-card">
@@ -912,7 +921,7 @@ function TabDinero({ org, guardarOrg, noLeidas, onMarcarLeidas, mes, showToast }
                 <div className={`tut-item${idsNuevas.has(s.id) ? " fresh" : ""}`} key={s.id}>
                   <div className="tut-item-row">
                     <div>
-                      <div className="name">{nA(s.alumnoId)}{sm === "USD" && <span className="tut-pill linea" style={{ marginLeft: 8 }}>US$</span>}{idsNuevas.has(s.id) && <span className="tut-newtag">NUEVA</span>}</div>
+                      <div className="name">{nA(s.alumnoId)}{sm === "USD" && <span className="tut-pill linea" style={{ marginLeft: 8 }}>US$</span>}{esP(s) && <span className="tut-pill" style={{ marginLeft: 8, background: "var(--accent-soft)", color: "var(--accent)" }}>personal</span>}{idsNuevas.has(s.id) && <span className="tut-newtag">NUEVA</span>}</div>
                       <div className="meta">Tutor: <b>{nT(s.tutorId)}</b>{s.materia ? <> · {s.materia}</> : null} · {fmtFecha(s.fecha)} · {fmtDur(s.duracion)} <span className={`tut-pill${s.modalidad === LINEA ? " linea" : ""}`}>{s.modalidad}</span>{s.registradoPor ? <span style={{ color: "var(--ink-soft)" }}> · registró: {s.registradoPor === "coordinador" ? "coordinador" : "tutor"}</span> : null}</div>
                       {s.notas && <div className="meta" style={{ marginTop: 5 }}>{s.notas}</div>}
                     </div>
@@ -988,11 +997,13 @@ function TabAnalisis({ org, mes }) {
   const fHoras = (min) => `${(min / 60).toFixed(1)} h`;
   const periodo = fmtPeriodo(mes);
 
+  const pidA = org.personalTutorId || null;
   const ses = useMemo(() => org.sesiones.filter((s) => enMes(s.fecha, mes)), [org.sesiones, mes]);
-  const sesQ = ses.filter((s) => (s.moneda || "Q") === "Q");
-  const sesUSD = ses.filter((s) => s.moneda === "USD");
+  const sesEmpresa = ses.filter((s) => !pidA || s.tutorId !== pidA);
+  const sesQ = sesEmpresa.filter((s) => (s.moneda || "Q") === "Q");
+  const sesUSD = sesEmpresa.filter((s) => s.moneda === "USD");
 
-  const minTotal = ses.reduce((a, s) => a + (s.duracion || 0), 0);
+  const minTotal = sesEmpresa.reduce((a, s) => a + (s.duracion || 0), 0);
   const ingresosQ = sesQ.reduce((a, s) => a + (s.cobro || 0), 0);
   const pagosQ = sesQ.reduce((a, s) => a + (s.pago || 0), 0);
   const gananciaQ = ingresosQ - pagosQ;
@@ -1023,7 +1034,7 @@ function TabAnalisis({ org, mes }) {
 
   // Ganancia por mes (TODOS los meses, no solo el seleccionado)
   const porMes = (() => {
-    const m = agrupar(org.sesiones.filter((s) => (s.moneda || "Q") === "Q"), (s) => (s.fecha || "").slice(0, 7));
+    const m = agrupar(org.sesiones.filter((s) => (s.moneda || "Q") === "Q" && (!pidA || s.tutorId !== pidA)), (s) => (s.fecha || "").slice(0, 7));
     const arr = [...m.entries()].map(([ym, ss]) => { const ing = ss.reduce((a, s) => a + (s.cobro || 0), 0); const pg = ss.reduce((a, s) => a + (s.pago || 0), 0); return { ym, ing, pg, gan: ing - pg, n: ss.length, pct: ing > 0 ? ((ing - pg) / ing) * 100 : 0 }; });
     return arr.sort((a, b) => a.ym.localeCompare(b.ym));
   })();
@@ -1185,7 +1196,8 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
   const alumnosUSD = sortSaldo(org.alumnos.filter((a) => a.moneda === "USD").map(filaAlumno)).filter((f) => !soloDeudores || f.generado - f.pagado > 0.005);
 
   // --- TUTORES: separar el devengado según la moneda del alumno de cada sesión ---
-  const filasTutoresQ = org.tutores.map((t) => {
+  const pidC = org.personalTutorId || null;
+  const filasTutoresQ = org.tutores.filter((t) => t.id !== pidC).map((t) => {
     const devengado = org.sesiones.filter((s) => s.tutorId === t.id && (s.moneda || "Q") === "Q" && enMes(s.fecha, mes)).reduce((x, s) => x + (s.pago || 0), 0);
     const movs = org.pagos.filter((p) => p.tutorId === t.id && enMes(p.fecha, mes));
     const pagado = movs.reduce((x, p) => x + (p.monto || 0), 0);
@@ -1209,8 +1221,9 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
   const conc = org.conciliacion || { guardado: 0, banco: 0 };
   const cobradoQ = org.cobros.filter((c) => monA(c.alumnoId) === "Q").reduce((x, c) => x + (c.monto || 0), 0);
   const pagadoTutores = org.pagos.reduce((x, p) => x + (p.monto || 0), 0); // pagos de cuenta principal (Q)
-  const facturadoQ = org.sesiones.filter((s) => (s.moneda || "Q") === "Q").reduce((x, s) => x + (s.cobro || 0), 0);
-  const devengadoQ = org.sesiones.filter((s) => (s.moneda || "Q") === "Q").reduce((x, s) => x + (s.pago || 0), 0);
+  // Para conciliación: solo sesiones empresa (sin cuenta personal del coordinador)
+  const facturadoQ = org.sesiones.filter((s) => (s.moneda || "Q") === "Q" && s.tutorId !== pidC).reduce((x, s) => x + (s.cobro || 0), 0);
+  const devengadoQ = org.sesiones.filter((s) => (s.moneda || "Q") === "Q" && s.tutorId !== pidC).reduce((x, s) => x + (s.pago || 0), 0);
   const porCobrarNeto = facturadoQ - cobradoQ;
   const porPagarNeto = devengadoQ - pagadoTutores;
   const esperado = num(conc.guardado) + cobradoQ - pagadoTutores;
