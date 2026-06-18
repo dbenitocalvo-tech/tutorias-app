@@ -843,6 +843,7 @@ function TabDinero({ org, guardarOrg, noLeidas, onMarcarLeidas, mes, showToast }
   const hayUSD = sesionesMesEmpresa.some((s) => monS(s) === "USD");
   const dineroDiegoQ = pid ? sesionesMes.filter((s) => esP(s) && monS(s) === "Q").reduce((a, s) => a + (s.cobro || 0), 0) : 0;
   const nombrePersonal = pid ? (org.tutores.find((t) => t.id === pid)?.nombre || "Personal") : "";
+  const porAlumnoPersonal = pid ? org.alumnos.map((a) => { const ss = sesionesMes.filter((s) => esP(s) && s.alumnoId === a.id); return { nombre: a.nombre, total: ss.reduce((x, s) => x + (s.cobro || 0), 0), min: ss.reduce((x, s) => x + s.duracion, 0), n: ss.length }; }).filter((x) => x.n > 0).sort((a, b) => b.total - a.total) : [];
 
   const porAlumno = useMemo(() => org.alumnos.map((a) => { const ss = sesionesMesEmpresa.filter((s) => s.alumnoId === a.id); return { nombre: a.nombre, moneda: a.moneda || "Q", total: ss.reduce((x, s) => x + (s.cobro || 0), 0), min: ss.reduce((x, s) => x + s.duracion, 0), n: ss.length }; }).filter((x) => x.n > 0).sort((x, y) => y.total - x.total), [org.alumnos, sesionesMesEmpresa]);
   const porTutor = useMemo(() => org.tutores.filter((t) => t.id !== pid).map((t) => { const ss = sesionesMes.filter((s) => s.tutorId === t.id); return { nombre: t.nombre, total: ss.reduce((x, s) => x + (s.pago || 0), 0), min: ss.reduce((x, s) => x + s.duracion, 0), n: ss.length }; }).filter((x) => x.n > 0).sort((x, y) => y.total - x.total), [org.tutores, sesionesMes, pid]);
@@ -854,7 +855,7 @@ function TabDinero({ org, guardarOrg, noLeidas, onMarcarLeidas, mes, showToast }
       <div className="tut-stats">
         <div className="tut-stat"><div className="v">{sesionesMes.length}</div><div className="l">Clases · {periodo}</div></div>
         <div className="tut-stat"><div className="v">{(minTotal / 60).toFixed(1)}</div><div className="l">Horas dadas (solo Q)</div></div>
-        <div className="tut-stat"><div className="v">{fmtQ(ingresosQ)}</div><div className="l">Ingresos en Q</div></div>
+        <div className="tut-stat"><div className="v">{fmtQ(ingresosQ)}</div><div className="l">Ingresos empresa (Q)</div></div>
         <div className="tut-stat"><div className="v">{fmtQ(pagosQ)}</div><div className="l">Pagos a tutores (Q)</div></div>
         <div className="tut-stat"><div className={`v ${gananciaQ >= 0 ? "pos" : "neg"}`}>{fmtQ(gananciaQ)}</div><div className="l">Ganancia empresa (Q)</div></div>
         <div className="tut-stat"><div className="v">{fmtMon(ingresosUSD, "USD")}</div><div className="l">Ingresos en US$</div></div>
@@ -896,6 +897,28 @@ function TabDinero({ org, guardarOrg, noLeidas, onMarcarLeidas, mes, showToast }
             <p className="sub">Lo generado a favor de cada tutor en {periodo.toLowerCase()}. Siempre en quetzales. El detalle por cuenta está en Cuentas y pagos.</p>
             {porTutor.map((x) => <div className="tut-sumrow" key={x.nombre}><span>{x.nombre} <span style={{ color: "var(--ink-soft)" }}>· {x.n} ses · {fmtDur(x.min)}</span></span><span className="amt">{fmtQ(x.total)}</span></div>)}
           </div>
+        </div>
+      )}
+
+      {pid && (
+        <div className="tut-card" style={{ marginTop: 16, borderColor: "var(--accent)", boxShadow: "0 0 0 3px var(--accent-soft)" }}>
+          <h2 style={{ color: "var(--accent)" }}>Ingresos personales · {nombrePersonal}</h2>
+          <p className="sub">Clases dadas por {nombrePersonal} en {periodo.toLowerCase()}. Estos ingresos son de cuenta separada y no entran en los totales de la empresa.</p>
+          {porAlumnoPersonal.length === 0
+            ? <div className="tut-empty">Sin clases personales en {periodo.toLowerCase()}.</div>
+            : <>
+                {porAlumnoPersonal.map((x) => (
+                  <div className="tut-sumrow" key={x.nombre}>
+                    <span>{x.nombre} <span style={{ color: "var(--ink-soft)" }}>· {x.n} ses · {fmtDur(x.min)}</span></span>
+                    <span className="amt" style={{ color: "var(--accent)" }}>{fmtQ(x.total)}</span>
+                  </div>
+                ))}
+                <div className="tut-sumrow" style={{ marginTop: 4 }}>
+                  <b>Total personal</b>
+                  <span className="amt" style={{ color: "var(--accent)", fontFamily: "Space Grotesk", fontWeight: 700 }}>{fmtQ(dineroDiegoQ)}</span>
+                </div>
+              </>
+          }
         </div>
       )}
 
