@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { supabase } from "./supabaseClient";
 
 const ORG_KEY = "tutorias-org-v15";
@@ -329,6 +329,7 @@ export default function App() {
   const [cargando, setCargando] = useState(true);
   const [toast, setToast] = useState(null);
   const [dbError, setDbError] = useState(null);
+  const lastSaveRef = useRef(0);
   const showToast = useCallback((m) => { setToast(m); setTimeout(() => setToast(null), 2600); }, []);
 
   const cargar = useCallback(async () => {
@@ -362,6 +363,7 @@ export default function App() {
       final = { ...next, auditoria: [entrada, ...(next.auditoria || [])].slice(0, 1000) };
     }
     setOrg(final);
+    lastSaveRef.current = Date.now();
     try {
       const { error } = await supabase.from("app_estado").upsert({ id: "singleton", data: final, actualizado_en: new Date().toISOString() });
       if (error) {
@@ -385,6 +387,7 @@ export default function App() {
     if (sesion?.tipo !== "coordinador") return;
     const t = setInterval(async () => {
       try {
+        if (Date.now() - lastSaveRef.current < 6000) return;
         const { data } = await supabase.from("app_estado").select("data").eq("id", "singleton").single();
         if (data?.data) setOrg({ ...emptyOrg(), ...data.data });
       } catch {}
@@ -508,7 +511,7 @@ function SelectorMes({ mes, setMes }) {
 function PanelCoordinador({ org, guardarOrg, showToast, noLeidas, onMarcarLeidas }) {
   const [tab, setTab] = useState("dinero");
   const [mes, setMes] = useState(mesActual());
-  const conMes = tab === "dinero" || tab === "cuentas";
+  const conMes = tab === "dinero";
   return (
     <>
       <div className="tut-tabs" role="tablist">
@@ -1208,8 +1211,8 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
   // --- ALUMNOS, separados por moneda ---
   const filaAlumno = (a) => {
     const mon = a.moneda || "Q";
-    const facturado = org.sesiones.filter((s) => s.alumnoId === a.id && enMes(s.fecha, mes)).reduce((x, s) => x + (s.cobro || 0), 0);
-    const movs = org.cobros.filter((c) => c.alumnoId === a.id && enMes(c.fecha, mes));
+    const facturado = org.sesiones.filter((s) => s.alumnoId === a.id).reduce((x, s) => x + (s.cobro || 0), 0);
+    const movs = org.cobros.filter((c) => c.alumnoId === a.id);
     const recibido = movs.reduce((x, c) => x + (c.monto || 0), 0);
     return { id: a.id, nombre: a.nombre, moneda: mon, generado: facturado, pagado: recibido, movs };
   };
@@ -1221,15 +1224,15 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
   // --- TUTORES: separar el devengado según la moneda del alumno de cada sesión ---
   const pidC = org.personalTutorId || null;
   const filasTutoresQ = org.tutores.filter((t) => t.id !== pidC).map((t) => {
-    const devengado = org.sesiones.filter((s) => s.tutorId === t.id && (s.moneda || "Q") === "Q" && enMes(s.fecha, mes)).reduce((x, s) => x + (s.pago || 0), 0);
-    const movs = org.pagos.filter((p) => p.tutorId === t.id && enMes(p.fecha, mes));
+    const devengado = org.sesiones.filter((s) => s.tutorId === t.id && (s.moneda || "Q") === "Q").reduce((x, s) => x + (s.pago || 0), 0);
+    const movs = org.pagos.filter((p) => p.tutorId === t.id);
     const pagado = movs.reduce((x, p) => x + (p.monto || 0), 0);
     return { id: t.id, nombre: t.nombre, moneda: "Q", generado: devengado, pagado, movs };
   }).filter((f) => f.generado > 0 || f.pagado > 0);
   // Tutorías de alumnos en US$: el pago al tutor es en Q pero de otra cuenta. Solo registro, sin cuadre.
   const tutoresOtraCuenta = org.tutores.map((t) => {
-    const devengado = org.sesiones.filter((s) => s.tutorId === t.id && s.moneda === "USD" && enMes(s.fecha, mes)).reduce((x, s) => x + (s.pago || 0), 0);
-    const movs = (org.pagosUSD || []).filter((p) => p.tutorId === t.id && enMes(p.fecha, mes));
+    const devengado = org.sesiones.filter((s) => s.tutorId === t.id && s.moneda === "USD").reduce((x, s) => x + (s.pago || 0), 0);
+    const movs = (org.pagosUSD || []).filter((p) => p.tutorId === t.id);
     const pagado = movs.reduce((x, p) => x + (p.monto || 0), 0);
     return { id: t.id, nombre: t.nombre, moneda: "Q", generado: devengado, pagado, movs };
   }).filter((f) => f.generado > 0 || f.pagado > 0);
@@ -1243,15 +1246,10 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
   // --- Conciliación: SOLO quetzales (cuenta principal). Los dólares no entran. ---
   const conc = org.conciliacion || { guardado: 0, banco: 0 };
   const cobradoQ = org.cobros.filter((c) => monA(c.alumnoId) === "Q").reduce((x, c) => x + (c.monto || 0), 0);
-  const pagadoTutores = org.pagos.reduce((x, p) => x + (p.monto || 0), 0); // pagos de cuenta principal (Q)
-  // Para conciliación: solo sesiones empresa (sin cuenta personal del coordinador)
-  const facturadoQ = org.sesiones.filter((s) => (s.moneda || "Q") === "Q" && s.tutorId !== pidC).reduce((x, s) => x + (s.cobro || 0), 0);
-  const devengadoQ = org.sesiones.filter((s) => (s.moneda || "Q") === "Q" && s.tutorId !== pidC).reduce((x, s) => x + (s.pago || 0), 0);
-  const porCobrarNeto = facturadoQ - cobradoQ;
-  const porPagarNeto = devengadoQ - pagadoTutores;
-  const esperado = num(conc.guardado) + cobradoQ - pagadoTutores;
-  const posicionNeta = esperado + porCobrarNeto - porPagarNeto;
-  const diff = num(conc.banco) - posicionNeta;
+  const pagadoTutores = org.pagos.reduce((x, p) => x + (p.monto || 0), 0);
+  const gananciaAnio = cobradoQ - pagadoTutores;
+  const balance = num(conc.guardado) + gananciaAnio - debenQ;
+  const diff = num(conc.banco) - balance;
   const cuadra = Math.abs(diff) < 0.005;
   const setConc = (campo, valor) => guardarOrg({ ...org, conciliacion: { ...conc, [campo]: num(valor) } });
 
@@ -1267,29 +1265,35 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
       {/* Conciliación: solo quetzales */}
       <div className="tut-card" style={{ marginBottom: 16 }}>
         <h2>Conciliación de caja (solo Q)</h2>
-        <p className="sub">Comprueba si tu registro en quetzales cuadra con el banco. Las tutorías en dólares se pagan de otra cuenta y no entran aquí. Usa todos tus movimientos en Q, no solo el mes.</p>
-        <div className="tut-twocol">
-          <div>
-            <div className="tut-sumrow"><span>Saldo guardado (inicial)</span>
-              <MoneyInput value={conc.guardado || 0} onCommit={(v) => setConc("guardado", v)}
-                style={{ width: 120, fontFamily: "Space Grotesk", textAlign: "right", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 9px" }} /></div>
-            <div className="tut-sumrow"><span>+ Cobrado a alumnos (Q)</span><span className="amt" style={{ color: "var(--pos)" }}>{fmtQ(cobradoQ)}</span></div>
-            <div className="tut-sumrow"><span>− Pagado a tutores (Q)</span><span className="amt" style={{ color: "var(--neg)" }}>{fmtQ(pagadoTutores)}</span></div>
-            <div className="tut-sumrow"><b>= Deberías tener</b><span className="amt">{fmtQ(esperado)}</span></div>
-            <div className="tut-sumrow"><span>Saldo real en banco</span>
-              <MoneyInput value={conc.banco || 0} onCommit={(v) => setConc("banco", v)}
-                style={{ width: 120, fontFamily: "Space Grotesk", textAlign: "right", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 9px" }} /></div>
-            <div className="tut-sumrow" style={{ marginTop: 4 }}>
-              <b>{cuadra ? "Cuadra" : "Descuadre"}</b>
-              <span className="amt" style={{ color: cuadra ? "var(--pos)" : "var(--neg)" }}>{cuadra ? "✓ Q0.00" : (diff > 0 ? `+${fmtQ(diff)}` : fmtQ(diff))}</span>
-            </div>
+        <p className="sub">Verifica si tu banco cuadra con lo cobrado y lo pendiente de alumnos. Las tutorías en dólares no entran aquí.</p>
+        <div style={{ maxWidth: 460 }}>
+          <div className="tut-sumrow">
+            <span>Saldo guardado (inicial)</span>
+            <MoneyInput value={conc.guardado || 0} onCommit={(v) => setConc("guardado", v)}
+              style={{ width: 120, fontFamily: "Space Grotesk", textAlign: "right", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 9px" }} />
           </div>
-          <div>
-            <div className="tut-subhead" style={{ marginTop: 0 }}>Posición en Q considerando pendientes</div>
-            <div className="tut-sumrow"><span>Efectivo (deberías tener)</span><span className="amt">{fmtQ(esperado)}</span></div>
-            <div className="tut-sumrow"><span>+ Por cobrar a alumnos (Q)</span><span className="amt" style={{ color: porCobrarNeto >= 0 ? "var(--pos)" : "var(--neg)" }}>{fmtQ(porCobrarNeto)}</span></div>
-            <div className="tut-sumrow"><span>− Por pagar a tutores (Q)</span><span className="amt" style={{ color: "var(--neg)" }}>{fmtQ(porPagarNeto)}</span></div>
-            <div className="tut-sumrow" style={{ marginTop: 4 }}><b>= Posición neta (Q)</b><span className="amt">{fmtQ(posicionNeta)}</span></div>
+          <div className="tut-sumrow">
+            <span>+ Ganancia del año <span style={{ color: "var(--ink-soft)", fontWeight: 400, fontSize: "0.85em" }}>({fmtQ(cobradoQ)} cobrado − {fmtQ(pagadoTutores)} tutores)</span></span>
+            <span className="amt" style={{ color: "var(--pos)" }}>{fmtQ(gananciaAnio)}</span>
+          </div>
+          <div className="tut-sumrow">
+            <span>− Cuentas por cobrar</span>
+            <span className="amt" style={{ color: "var(--neg)" }}>{fmtQ(debenQ)}</span>
+          </div>
+          <div className="tut-sumrow" style={{ borderTop: "1px solid var(--line)", marginTop: 6, paddingTop: 8 }}>
+            <b>= Balance</b>
+            <span className="amt" style={{ fontFamily: "Space Grotesk", fontWeight: 700 }}>{fmtQ(balance)}</span>
+          </div>
+          <div className="tut-sumrow" style={{ marginTop: 10 }}>
+            <span>Banco actual</span>
+            <MoneyInput value={conc.banco || 0} onCommit={(v) => setConc("banco", v)}
+              style={{ width: 120, fontFamily: "Space Grotesk", textAlign: "right", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 9px" }} />
+          </div>
+          <div className="tut-sumrow" style={{ marginTop: 4 }}>
+            <b>{cuadra ? "Cuadra" : "Descuadre"}</b>
+            <span className="amt" style={{ color: cuadra ? "var(--pos)" : diff < 0 ? "var(--neg)" : "var(--accent)" }}>
+              {cuadra ? "✓ Q0.00" : (diff > 0 ? `+${fmtQ(diff)}` : fmtQ(diff))}
+            </span>
           </div>
         </div>
       </div>
@@ -1443,7 +1447,6 @@ function FormSesion({ org, tutorId, alumnosDisponibles, onRegistrar, mostrarTuto
     const r2 = (x) => Math.round(x * 100) / 100;
     const cobro = rel ? r2((enLinea ? rel.cobroLin : rel.cobroPres) * horas) : 0;
     const pago = rel ? r2((enLinea ? rel.pagoLin : rel.pagoPres) * horas) : 0;
-    console.log("[enviar] f.horas:", f.horas, "f.minutos:", f.minutos, "dur:", dur, "horas:", horas, "rel:", rel, "cobro:", cobro, "pago:", pago);
     onRegistrar({ id: uid(), tutorId, alumnoId: f.alumnoId, materia: f.materia, fecha: f.fecha, duracion: dur, modalidad: f.modalidad, notas: f.notas.trim(), cobro, pago, moneda: (alumno?.moneda || "Q"), registradoPor, subidaEn: Date.now() });
     setF(blank);
   };
