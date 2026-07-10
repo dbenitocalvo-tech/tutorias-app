@@ -1208,13 +1208,19 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
 
   const periodo = fmtPeriodo(mes);
 
+  const pidC = org.personalTutorId || null;
+  const nombrePersonal = pidC ? (org.tutores.find((t) => t.id === pidC)?.nombre || "Diego") : "";
+
   // --- ALUMNOS, separados por moneda ---
   const filaAlumno = (a) => {
     const mon = a.moneda || "Q";
-    const facturado = org.sesiones.filter((s) => s.alumnoId === a.id).reduce((x, s) => x + (s.cobro || 0), 0);
+    const todasSes = org.sesiones.filter((s) => s.alumnoId === a.id);
+    const facturado = todasSes.reduce((x, s) => x + (s.cobro || 0), 0);
+    const facturadoEmpresa = todasSes.filter((s) => !pidC || s.tutorId !== pidC).reduce((x, s) => x + (s.cobro || 0), 0);
+    const facturadoDiego = pidC ? todasSes.filter((s) => s.tutorId === pidC).reduce((x, s) => x + (s.cobro || 0), 0) : 0;
     const movs = org.cobros.filter((c) => c.alumnoId === a.id);
     const recibido = movs.reduce((x, c) => x + (c.monto || 0), 0);
-    return { id: a.id, nombre: a.nombre, moneda: mon, generado: facturado, pagado: recibido, movs };
+    return { id: a.id, nombre: a.nombre, moneda: mon, generado: facturado, facturadoEmpresa, facturadoDiego, diegoNombre: facturadoDiego > 0 ? nombrePersonal : null, pagado: recibido, movs };
   };
   const [soloDeudores, setSoloDeudores] = useState(false);
   const sortSaldo = (arr) => [...arr].sort((a, b) => (b.generado - b.pagado) - (a.generado - a.pagado));
@@ -1222,7 +1228,6 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
   const alumnosUSD = sortSaldo(org.alumnos.filter((a) => a.moneda === "USD").map(filaAlumno)).filter((f) => !soloDeudores || f.generado - f.pagado > 0.005);
 
   // --- TUTORES: separar el devengado según la moneda del alumno de cada sesión ---
-  const pidC = org.personalTutorId || null;
   const filasTutoresQ = org.tutores.filter((t) => t.id !== pidC).map((t) => {
     const devengado = org.sesiones.filter((s) => s.tutorId === t.id && (s.moneda || "Q") === "Q").reduce((x, s) => x + (s.pago || 0), 0);
     const movs = org.pagos.filter((p) => p.tutorId === t.id);
@@ -1239,6 +1244,11 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
 
   // --- Totales de cabecera ---
   const debenQ = alumnosQ.reduce((x, f) => x + Math.max(0, f.generado - f.pagado), 0);
+  const debenEmpresaQ = alumnosQ.reduce((x, f) => {
+    const saldo = Math.max(0, f.generado - f.pagado);
+    if (!f.facturadoDiego || f.generado === 0) return x + saldo;
+    return x + saldo * (f.facturadoEmpresa / f.generado);
+  }, 0);
   const debenUSD = alumnosUSD.reduce((x, f) => x + Math.max(0, f.generado - f.pagado), 0);
   const debesTutoresQ = filasTutoresQ.reduce((x, f) => x + Math.max(0, f.generado - f.pagado), 0);
   const debesOtraCuenta = tutoresOtraCuenta.reduce((x, f) => x + Math.max(0, f.generado - f.pagado), 0);
@@ -1246,9 +1256,13 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
   // --- Conciliación: SOLO quetzales (cuenta principal). Los dólares no entran. ---
   const conc = org.conciliacion || { guardado: 0, banco: 0 };
   const cobradoQ = org.cobros.filter((c) => monA(c.alumnoId) === "Q").reduce((x, c) => x + (c.monto || 0), 0);
+  const cobradoEmpresaQ = alumnosQ.reduce((x, f) => {
+    if (!f.facturadoDiego || f.generado === 0) return x + f.pagado;
+    return x + f.pagado * (f.facturadoEmpresa / f.generado);
+  }, 0);
   const pagadoTutores = org.pagos.reduce((x, p) => x + (p.monto || 0), 0);
-  const gananciaAnio = cobradoQ - pagadoTutores;
-  const balance = num(conc.guardado) + gananciaAnio - debenQ;
+  const gananciaAnio = cobradoEmpresaQ - pagadoTutores;
+  const balance = num(conc.guardado) + gananciaAnio - debenEmpresaQ;
   const diff = num(conc.banco) - balance;
   const cuadra = Math.abs(diff) < 0.005;
   const setConc = (campo, valor) => guardarOrg({ ...org, conciliacion: { ...conc, [campo]: num(valor) } });
@@ -1273,12 +1287,12 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
               style={{ width: 120, fontFamily: "Space Grotesk", textAlign: "right", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 9px" }} />
           </div>
           <div className="tut-sumrow">
-            <span>+ Ganancia del año <span style={{ color: "var(--ink-soft)", fontWeight: 400, fontSize: "0.85em" }}>({fmtQ(cobradoQ)} cobrado − {fmtQ(pagadoTutores)} tutores)</span></span>
+            <span>+ Ganancia del año <span style={{ color: "var(--ink-soft)", fontWeight: 400, fontSize: "0.85em" }}>({fmtQ(cobradoEmpresaQ)} cobrado − {fmtQ(pagadoTutores)} tutores)</span></span>
             <span className="amt" style={{ color: "var(--pos)" }}>{fmtQ(gananciaAnio)}</span>
           </div>
           <div className="tut-sumrow">
-            <span>− Cuentas por cobrar</span>
-            <span className="amt" style={{ color: "var(--neg)" }}>{fmtQ(debenQ)}</span>
+            <span>− Cuentas por cobrar <span style={{ color: "var(--ink-soft)", fontWeight: 400, fontSize: "0.85em" }}>(sin Diego)</span></span>
+            <span className="amt" style={{ color: "var(--neg)" }}>{fmtQ(debenEmpresaQ)}</span>
           </div>
           <div className="tut-sumrow" style={{ borderTop: "1px solid var(--line)", marginTop: 6, paddingTop: 8 }}>
             <b>= Balance</b>
@@ -1379,6 +1393,7 @@ function FilaCuenta({ fila, modo, mon = "Q", onRegistrar, onEliminar }) {
         <div>
           <div className="name">{fila.nombre}</div>
           <div className="meta">{modo === "alumnos" ? "Facturado" : "Generado"} <b>{fmtMon(fila.generado, mon)}</b> · {modo === "alumnos" ? "pagado por el alumno" : "ya pagado"} <b>{fmtMon(fila.pagado, mon)}</b></div>
+          {fila.diegoNombre && <div className="meta" style={{ marginTop: 2 }}>Tutorías <b>{fmtMon(fila.facturadoEmpresa, mon)}</b> <span style={{ color: "var(--accent)" }}>· {fila.diegoNombre} <b>{fmtMon(fila.facturadoDiego, mon)}</b></span></div>}
         </div>
         <div style={{ textAlign: "right" }}>
           <div className="name" style={{ color: estado.cls === "neg" ? "var(--neg)" : "var(--pos)" }}>{estado.txt}</div>
