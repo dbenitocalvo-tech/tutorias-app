@@ -1291,7 +1291,7 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
             <span className="amt" style={{ color: "var(--pos)" }}>{fmtQ(gananciaAnio)}</span>
           </div>
           <div className="tut-sumrow">
-            <span>− Cuentas por cobrar <span style={{ color: "var(--ink-soft)", fontWeight: 400, fontSize: "0.85em" }}>(sin Diego)</span></span>
+            <span>− Cuentas por cobrar <span style={{ color: "var(--ink-soft)", fontWeight: 400, fontSize: "0.85em" }}>(empresa)</span></span>
             <span className="amt" style={{ color: "var(--neg)" }}>{fmtQ(debenEmpresaQ)}</span>
           </div>
           <div className="tut-sumrow" style={{ borderTop: "1px solid var(--line)", marginTop: 6, paddingTop: 8 }}>
