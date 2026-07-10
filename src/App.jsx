@@ -1245,9 +1245,8 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
   // --- Totales de cabecera ---
   const debenQ = alumnosQ.reduce((x, f) => x + Math.max(0, f.generado - f.pagado), 0);
   const debenEmpresaQ = alumnosQ.reduce((x, f) => {
-    const saldo = Math.max(0, f.generado - f.pagado);
-    if (!f.facturadoDiego || f.generado === 0) return x + saldo;
-    return x + saldo * (f.facturadoEmpresa / f.generado);
+    if (!f.facturadoDiego) return x + Math.max(0, f.generado - f.pagado);
+    return x + Math.max(0, f.facturadoEmpresa - f.pagado);
   }, 0);
   const debenUSD = alumnosUSD.reduce((x, f) => x + Math.max(0, f.generado - f.pagado), 0);
   const debesTutoresQ = filasTutoresQ.reduce((x, f) => x + Math.max(0, f.generado - f.pagado), 0);
@@ -1257,8 +1256,8 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
   const conc = org.conciliacion || { guardado: 0, banco: 0 };
   const cobradoQ = org.cobros.filter((c) => monA(c.alumnoId) === "Q").reduce((x, c) => x + (c.monto || 0), 0);
   const cobradoEmpresaQ = alumnosQ.reduce((x, f) => {
-    if (!f.facturadoDiego || f.generado === 0) return x + f.pagado;
-    return x + f.pagado * (f.facturadoEmpresa / f.generado);
+    if (!f.facturadoDiego) return x + f.pagado;
+    return x + Math.min(f.pagado, f.facturadoEmpresa);
   }, 0);
   const pagadoTutores = org.pagos.reduce((x, p) => x + (p.monto || 0), 0);
   const gananciaAnio = cobradoEmpresaQ - pagadoTutores;
