@@ -1211,53 +1211,61 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
   const pidC = org.personalTutorId || null;
   const nombrePersonal = pidC ? (org.tutores.find((t) => t.id === pidC)?.nombre || "Diego") : "";
 
+  const [soloDeudores, setSoloDeudores] = useState(false);
+  const [periodoFiltro, setPeriodoFiltro] = useState("mes");
+  const enPeriodo = (fecha) =>
+    periodoFiltro === "mes" ? (fecha || "").startsWith(mes) :
+    periodoFiltro === "anio" ? (fecha || "").startsWith(mes.slice(0, 4)) : true;
+
   // --- ALUMNOS, separados por moneda ---
   const filaAlumno = (a) => {
     const mon = a.moneda || "Q";
-    const todasSes = org.sesiones.filter((s) => s.alumnoId === a.id);
+    const todasSes = org.sesiones.filter((s) => s.alumnoId === a.id && enPeriodo(s.fecha));
     const facturado = todasSes.reduce((x, s) => x + (s.cobro || 0), 0);
     const facturadoEmpresa = todasSes.filter((s) => !pidC || s.tutorId !== pidC).reduce((x, s) => x + (s.cobro || 0), 0);
     const facturadoDiego = pidC ? todasSes.filter((s) => s.tutorId === pidC).reduce((x, s) => x + (s.cobro || 0), 0) : 0;
-    const movs = org.cobros.filter((c) => c.alumnoId === a.id);
+    const movs = org.cobros.filter((c) => c.alumnoId === a.id && enPeriodo(c.fecha));
     const recibido = movs.reduce((x, c) => x + (c.monto || 0), 0);
     return { id: a.id, nombre: a.nombre, moneda: mon, generado: facturado, facturadoEmpresa, facturadoDiego, diegoNombre: facturadoDiego > 0 ? nombrePersonal : null, pagado: recibido, movs };
   };
-  const [soloDeudores, setSoloDeudores] = useState(false);
   const sortSaldo = (arr) => [...arr].sort((a, b) => (b.generado - b.pagado) - (a.generado - a.pagado));
   const alumnosQ = sortSaldo(org.alumnos.filter((a) => (a.moneda || "Q") === "Q").map(filaAlumno)).filter((f) => !soloDeudores || f.generado - f.pagado > 0.005);
   const alumnosUSD = sortSaldo(org.alumnos.filter((a) => a.moneda === "USD").map(filaAlumno)).filter((f) => !soloDeudores || f.generado - f.pagado > 0.005);
 
   // --- TUTORES: separar el devengado según la moneda del alumno de cada sesión ---
   const filasTutoresQ = org.tutores.filter((t) => t.id !== pidC).map((t) => {
-    const devengado = org.sesiones.filter((s) => s.tutorId === t.id && (s.moneda || "Q") === "Q").reduce((x, s) => x + (s.pago || 0), 0);
-    const movs = org.pagos.filter((p) => p.tutorId === t.id);
+    const devengado = org.sesiones.filter((s) => s.tutorId === t.id && (s.moneda || "Q") === "Q" && enPeriodo(s.fecha)).reduce((x, s) => x + (s.pago || 0), 0);
+    const movs = org.pagos.filter((p) => p.tutorId === t.id && enPeriodo(p.fecha));
     const pagado = movs.reduce((x, p) => x + (p.monto || 0), 0);
     return { id: t.id, nombre: t.nombre, moneda: "Q", generado: devengado, pagado, movs };
   }).filter((f) => f.generado > 0 || f.pagado > 0);
   // Tutorías de alumnos en US$: el pago al tutor es en Q pero de otra cuenta. Solo registro, sin cuadre.
   const tutoresOtraCuenta = org.tutores.map((t) => {
-    const devengado = org.sesiones.filter((s) => s.tutorId === t.id && s.moneda === "USD").reduce((x, s) => x + (s.pago || 0), 0);
-    const movs = (org.pagosUSD || []).filter((p) => p.tutorId === t.id);
+    const devengado = org.sesiones.filter((s) => s.tutorId === t.id && s.moneda === "USD" && enPeriodo(s.fecha)).reduce((x, s) => x + (s.pago || 0), 0);
+    const movs = (org.pagosUSD || []).filter((p) => p.tutorId === t.id && enPeriodo(p.fecha));
     const pagado = movs.reduce((x, p) => x + (p.monto || 0), 0);
     return { id: t.id, nombre: t.nombre, moneda: "Q", generado: devengado, pagado, movs };
   }).filter((f) => f.generado > 0 || f.pagado > 0);
 
-  // --- Totales de cabecera ---
+  // --- Totales de cabecera (siguen el filtro de período) ---
   const debenQ = alumnosQ.reduce((x, f) => x + Math.max(0, f.generado - f.pagado), 0);
-  const debenEmpresaQ = alumnosQ.reduce((x, f) => {
-    if (!f.facturadoDiego) return x + Math.max(0, f.generado - f.pagado);
-    return x + Math.max(0, f.facturadoEmpresa - f.pagado);
-  }, 0);
   const debenUSD = alumnosUSD.reduce((x, f) => x + Math.max(0, f.generado - f.pagado), 0);
   const debesTutoresQ = filasTutoresQ.reduce((x, f) => x + Math.max(0, f.generado - f.pagado), 0);
   const debesOtraCuenta = tutoresOtraCuenta.reduce((x, f) => x + Math.max(0, f.generado - f.pagado), 0);
 
-  // --- Conciliación: SOLO quetzales (cuenta principal). Los dólares no entran. ---
+  // --- Conciliación: SOLO quetzales. Siempre datos totales, no filtrados por período. ---
   const conc = org.conciliacion || { guardado: 0, banco: 0 };
   const cobradoQ = org.cobros.filter((c) => monA(c.alumnoId) === "Q").reduce((x, c) => x + (c.monto || 0), 0);
-  const cobradoEmpresaQ = alumnosQ.reduce((x, f) => {
-    if (!f.facturadoDiego) return x + f.pagado;
-    return x + Math.min(f.pagado, f.facturadoEmpresa);
+  const cobradoEmpresaQ = org.alumnos.filter((a) => (a.moneda || "Q") === "Q").reduce((x, a) => {
+    const fEmp = org.sesiones.filter((s) => s.alumnoId === a.id && (!pidC || s.tutorId !== pidC)).reduce((ac, s) => ac + (s.cobro || 0), 0);
+    const fDie = pidC ? org.sesiones.filter((s) => s.alumnoId === a.id && s.tutorId === pidC).reduce((ac, s) => ac + (s.cobro || 0), 0) : 0;
+    const pag = org.cobros.filter((c) => c.alumnoId === a.id).reduce((ac, c) => ac + (c.monto || 0), 0);
+    return x + (!fDie ? pag : Math.min(pag, fEmp));
+  }, 0);
+  const debenEmpresaQ = org.alumnos.filter((a) => (a.moneda || "Q") === "Q").reduce((x, a) => {
+    const fEmp = org.sesiones.filter((s) => s.alumnoId === a.id && (!pidC || s.tutorId !== pidC)).reduce((ac, s) => ac + (s.cobro || 0), 0);
+    const pag = org.cobros.filter((c) => c.alumnoId === a.id).reduce((ac, c) => ac + (c.monto || 0), 0);
+    return x + Math.max(0, fEmp - pag);
   }, 0);
   const pagadoTutores = org.pagos.reduce((x, p) => x + (p.monto || 0), 0);
   const gananciaAnio = cobradoEmpresaQ - pagadoTutores;
@@ -1268,6 +1276,13 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
 
   return (
     <>
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, alignItems: "center" }}>
+        <span style={{ color: "var(--ink-soft)", fontSize: "0.88em", marginRight: 4 }}>Ver:</span>
+        {[{ k: "mes", lbl: periodo }, { k: "anio", lbl: mes.slice(0, 4) }, { k: "total", lbl: "Todo" }].map(({ k, lbl }) => (
+          <button key={k} className={`tut-btn sm ${periodoFiltro === k ? "" : "ghost"}`} onClick={() => setPeriodoFiltro(k)}>{lbl}</button>
+        ))}
+      </div>
+
       <div className="tut-stats">
         <div className="tut-stat"><div className="v neg">{fmtQ(debenQ)}</div><div className="l">Te deben (Q)</div></div>
         <div className="tut-stat"><div className="v neg">{fmtMon(debenUSD, "USD")}</div><div className="l">Te deben (US$)</div></div>
