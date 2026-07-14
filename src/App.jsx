@@ -1256,19 +1256,15 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
   // --- Conciliación: SOLO quetzales. Siempre datos totales, no filtrados por período. ---
   const conc = org.conciliacion || { guardado: 0, banco: 0 };
   const cobradoQ = org.cobros.filter((c) => monA(c.alumnoId) === "Q").reduce((x, c) => x + (c.monto || 0), 0);
-  const cobradoEmpresaQ = org.alumnos.filter((a) => (a.moneda || "Q") === "Q").reduce((x, a) => {
-    const fEmp = org.sesiones.filter((s) => s.alumnoId === a.id && (!pidC || s.tutorId !== pidC)).reduce((ac, s) => ac + (s.cobro || 0), 0);
-    const fDie = pidC ? org.sesiones.filter((s) => s.alumnoId === a.id && s.tutorId === pidC).reduce((ac, s) => ac + (s.cobro || 0), 0) : 0;
-    const pag = org.cobros.filter((c) => c.alumnoId === a.id).reduce((ac, c) => ac + (c.monto || 0), 0);
-    return x + (!fDie ? pag : Math.min(pag, fEmp));
-  }, 0);
   const debenEmpresaQ = org.alumnos.filter((a) => (a.moneda || "Q") === "Q").reduce((x, a) => {
     const fEmp = org.sesiones.filter((s) => s.alumnoId === a.id && (!pidC || s.tutorId !== pidC)).reduce((ac, s) => ac + (s.cobro || 0), 0);
     const pag = org.cobros.filter((c) => c.alumnoId === a.id).reduce((ac, c) => ac + (c.monto || 0), 0);
     return x + Math.max(0, fEmp - pag);
   }, 0);
-  const pagadoTutores = org.pagos.reduce((x, p) => x + (p.monto || 0), 0);
-  const gananciaAnio = cobradoEmpresaQ - pagadoTutores;
+  const anioActual = mes.slice(0, 4);
+  const gananciaAnio = org.sesiones
+    .filter((s) => (s.fecha || "").startsWith(anioActual) && (!pidC || s.tutorId !== pidC) && (s.moneda || "Q") === "Q")
+    .reduce((x, s) => x + (s.cobro || 0) - (s.pago || 0), 0);
   const balance = num(conc.guardado) + gananciaAnio - debenEmpresaQ;
   const diff = num(conc.banco) - balance;
   const cuadra = Math.abs(diff) < 0.005;
@@ -1301,7 +1297,7 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
               style={{ width: 120, fontFamily: "Space Grotesk", textAlign: "right", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 9px" }} />
           </div>
           <div className="tut-sumrow">
-            <span>+ Ganancia del año <span style={{ color: "var(--ink-soft)", fontWeight: 400, fontSize: "0.85em" }}>({fmtQ(cobradoEmpresaQ)} cobrado − {fmtQ(pagadoTutores)} tutores)</span></span>
+            <span>+ Ganancia del año</span>
             <span className="amt" style={{ color: "var(--pos)" }}>{fmtQ(gananciaAnio)}</span>
           </div>
           <div className="tut-sumrow">
