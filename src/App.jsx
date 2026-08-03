@@ -688,6 +688,9 @@ function TabRelaciones({ org, guardarOrg, showToast }) {
   const editarDias = (id, dias) => guardarOrg({ ...org, relaciones: org.relaciones.map((r) => r.id === id ? { ...r, dias } : r) }, "cambió días de relación");
   const eliminar = (id) => guardarOrg({ ...org, relaciones: org.relaciones.filter((r) => r.id !== id) }, "eliminó relación");
 
+  const [buscar, setBuscar] = useState("");
+  const [filtroTutor, setFiltroTutor] = useState("");
+  const [filtroAlumno, setFiltroAlumno] = useState("");
   const nA = (id) => org.alumnos.find((a) => a.id === id)?.nombre || "—";
   const nT = (id) => org.tutores.find((t) => t.id === id)?.nombre || "—";
   const monA = (id) => org.alumnos.find((a) => a.id === id)?.moneda || "Q";
@@ -761,9 +764,26 @@ function TabRelaciones({ org, guardarOrg, showToast }) {
       <div className="tut-card">
         <h2>Relaciones ({org.relaciones.length})</h2>
         <p className="sub">Edita los montos o los días directamente; todo se guarda al instante. Cambiar un precio solo afecta a las tutorías nuevas: las ya registradas conservan el monto que tenían.</p>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+          <input value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Buscar..." style={{ flex: "1 1 160px", minWidth: 140, border: "1px solid var(--line)", borderRadius: 8, padding: "6px 10px", fontFamily: "Inter", fontSize: 13, background: "var(--bg)", color: "var(--ink)" }} />
+          <select value={filtroAlumno} onChange={(e) => setFiltroAlumno(e.target.value)} style={{ flex: "1 1 140px", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 10px", fontFamily: "Inter", fontSize: 13, background: "var(--bg)", color: "var(--ink)" }}>
+            <option value="">Todos los alumnos</option>
+            {org.alumnos.map((a) => <option key={a.id} value={a.id}>{a.nombre}</option>)}
+          </select>
+          <select value={filtroTutor} onChange={(e) => setFiltroTutor(e.target.value)} style={{ flex: "1 1 140px", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 10px", fontFamily: "Inter", fontSize: 13, background: "var(--bg)", color: "var(--ink)" }}>
+            <option value="">Todos los tutores</option>
+            {org.tutores.map((t) => <option key={t.id} value={t.id}>{t.nombre}</option>)}
+          </select>
+          {(buscar || filtroAlumno || filtroTutor) && <button className="tut-btn ghost sm" onClick={() => { setBuscar(""); setFiltroAlumno(""); setFiltroTutor(""); }}>Limpiar</button>}
+        </div>
         {org.relaciones.length === 0 ? <div className="tut-empty">Aún no hay relaciones. Crea la primera arriba.</div> : (
           <div className="tut-list">
-            {org.relaciones.map((r) => {
+            {org.relaciones.filter((r) => {
+              if (filtroAlumno && r.alumnoId !== filtroAlumno) return false;
+              if (filtroTutor && r.tutorId !== filtroTutor) return false;
+              if (buscar) { const q = buscar.toLowerCase(); return nA(r.alumnoId).toLowerCase().includes(q) || nT(r.tutorId).toLowerCase().includes(q); }
+              return true;
+            }).map((r) => {
               const rUSD = monA(r.alumnoId) === "USD";
               return (
               <div className="tut-item" key={r.id}>
@@ -1104,12 +1124,21 @@ function TabAnalisis({ org, mes }) {
         <p className="sub">Todos los meses con tutorías de alumnos en quetzales. El margen es la ganancia sobre los ingresos.</p>
         {porMes.length === 0 ? <div className="tut-empty">Sin datos en quetzales.</div> : (
           <>
-            <div className="tut-bars" style={{ marginBottom: 18 }}>
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 160, borderBottom: "1px solid var(--line)", marginBottom: 6, overflowX: "auto" }}>
+              {porMes.map((m) => {
+                const h = Math.max(4, (Math.abs(m.gan) / maxGan) * 140);
+                return (
+                  <div key={m.ym} style={{ flex: "1 0 36px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", gap: 3, height: "100%" }}>
+                    <div style={{ fontSize: 10, color: "var(--ink-soft)", fontFamily: "Space Grotesk", fontWeight: 600, whiteSpace: "nowrap" }}>{fmtQ(m.gan)}</div>
+                    <div style={{ width: "100%", height: h, background: m.gan < 0 ? "var(--neg)" : "var(--primary)", borderRadius: "4px 4px 0 0" }} />
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ display: "flex", gap: 6, marginBottom: 18, overflowX: "auto" }}>
               {porMes.map((m) => (
-                <div className="tut-bar-row" key={m.ym}>
-                  <div className="lbl">{MESES[+m.ym.slice(5) - 1].slice(0, 3)} {m.ym.slice(2, 4)}</div>
-                  <div className="track"><div className={`fill ${m.gan < 0 ? "neg" : ""}`} style={{ width: `${Math.max(2, (Math.abs(m.gan) / maxGan) * 100)}%` }} /></div>
-                  <div className="val">{fmtQ(m.gan)}</div>
+                <div key={m.ym} style={{ flex: "1 0 36px", fontSize: 10, color: "var(--ink-soft)", textAlign: "center", textTransform: "capitalize" }}>
+                  {MESES[+m.ym.slice(5) - 1].slice(0, 3)}<br />{m.ym.slice(2, 4)}
                 </div>
               ))}
             </div>
@@ -1257,9 +1286,9 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
   const conc = org.conciliacion || { guardado: 0, banco: 0 };
   const cobradoQ = org.cobros.filter((c) => monA(c.alumnoId) === "Q").reduce((x, c) => x + (c.monto || 0), 0);
   const debenEmpresaQ = org.alumnos.filter((a) => (a.moneda || "Q") === "Q").reduce((x, a) => {
-    const fEmp = org.sesiones.filter((s) => s.alumnoId === a.id && (!pidC || s.tutorId !== pidC)).reduce((ac, s) => ac + (s.cobro || 0), 0);
+    const facturado = org.sesiones.filter((s) => s.alumnoId === a.id).reduce((ac, s) => ac + (s.cobro || 0), 0);
     const pag = org.cobros.filter((c) => c.alumnoId === a.id).reduce((ac, c) => ac + (c.monto || 0), 0);
-    return x + Math.max(0, fEmp - pag);
+    return x + Math.max(0, facturado - pag);
   }, 0);
   const anioActual = mes.slice(0, 4);
   const gananciaAnio = org.sesiones
@@ -1301,7 +1330,7 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
             <span className="amt" style={{ color: "var(--pos)" }}>{fmtQ(gananciaAnio)}</span>
           </div>
           <div className="tut-sumrow">
-            <span>− Cuentas por cobrar <span style={{ color: "var(--ink-soft)", fontWeight: 400, fontSize: "0.85em" }}>(empresa)</span></span>
+            <span>− Cuentas por cobrar</span>
             <span className="amt" style={{ color: "var(--neg)" }}>{fmtQ(debenEmpresaQ)}</span>
           </div>
           <div className="tut-sumrow" style={{ borderTop: "1px solid var(--line)", marginTop: 6, paddingTop: 8 }}>
