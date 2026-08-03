@@ -1286,9 +1286,9 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
   const conc = org.conciliacion || { guardado: 0, banco: 0 };
   const cobradoQ = org.cobros.filter((c) => monA(c.alumnoId) === "Q").reduce((x, c) => x + (c.monto || 0), 0);
   const debenEmpresaQ = org.alumnos.filter((a) => (a.moneda || "Q") === "Q").reduce((x, a) => {
-    const totalSes = org.sesiones.filter((s) => s.alumnoId === a.id).reduce((ac, s) => ac + (s.cobro || 0), 0);
+    const empresaSes = org.sesiones.filter((s) => s.alumnoId === a.id && (!pidC || s.tutorId !== pidC)).reduce((ac, s) => ac + (s.cobro || 0), 0);
     const pag = org.cobros.filter((c) => c.alumnoId === a.id).reduce((ac, c) => ac + (c.monto || 0), 0);
-    return x + Math.max(0, totalSes - pag);
+    return x + Math.max(0, empresaSes - pag);
   }, 0);
   const anioActual = mes.slice(0, 4);
   const gananciaAnio = org.sesiones
