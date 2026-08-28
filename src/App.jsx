@@ -253,13 +253,14 @@ function BotonConfirma({ onConfirm, children = "Eliminar", className = "tut-btn 
   );
 }
 
-/* Campo de monto editable con texto libre (permite borrar y decimales) */
-function MoneyInput({ value, onCommit, className = "money", style }) {
+/* Campo de monto editable con texto libre (permite borrar y decimales). Si se pasa `mon`, muestra formato "Q21,294.50" cuando no tiene foco. */
+function MoneyInput({ value, onCommit, className = "money", style, mon }) {
   const [txt, setTxt] = useState(value === 0 || value ? String(value) : "");
   const [foco, setFoco] = useState(false);
   useEffect(() => { if (!foco) setTxt(value === 0 || value ? String(value) : ""); }, [value, foco]);
+  const mostrar = !mon || foco ? txt : (txt === "" ? "" : fmtMon(num(txt), mon));
   return (
-    <input className={className} style={style} inputMode="decimal" value={txt}
+    <input className={className} style={style} inputMode={mon && !foco ? "text" : "decimal"} value={mostrar}
       onFocus={() => setFoco(true)} onBlur={() => setFoco(false)}
       onChange={(e) => { const v = e.target.value.replace(/[^\d.]/g, ""); setTxt(v); onCommit(num(v)); }} />
   );
@@ -708,7 +709,7 @@ function TabRelaciones({ org, guardarOrg, showToast }) {
     <>
       <div className="tut-card">
         <h2>Crear relación de precio</h2>
-        <p className="sub">El precio es por esta pareja: el mismo alumno con otro tutor puede tener montos y días distintos. El cobro va en la moneda del alumno; al tutor siempre se le paga en quetzales.</p>
+        <p className="sub">El precio es por esta pareja: el mismo alumno con otro tutor puede tener montos y días distintos. El cobro va en la moneda del alumno; si el alumno paga en dólares, al tutor también se le paga en dólares (de otra cuenta, no entra en la conciliación de caja).</p>
         <div className="tut-grid">
           <div className="tut-field"><label>Alumno</label><select value={f.alumnoId} onChange={setSel("alumnoId")}><option value="">Elige</option>{org.alumnos.map((a) => <option key={a.id} value={a.id}>{a.nombre} ({(a.moneda || "Q") === "USD" ? "US$" : "Q"})</option>)}</select></div>
           <div className="tut-field"><label>Tutor</label><select value={f.tutorId} onChange={setSel("tutorId")}><option value="">Elige</option>{org.tutores.map((t) => <option key={t.id} value={t.id}>{t.nombre}</option>)}</select></div>
@@ -718,10 +719,10 @@ function TabRelaciones({ org, guardarOrg, showToast }) {
         <div className="tut-subhead">Días de la semana</div>
         <DiasSelector value={f.dias} onChange={(d) => setF((p) => ({ ...p, dias: d }))} />
 
-        <div className="tut-subhead">Montos por modalidad{f.alumnoId ? ` · pago en Q${esUSD ? ", cobro en US$" : ", cobro en Q"}` : ""}</div>
+        <div className="tut-subhead">Montos por modalidad{f.alumnoId ? (esUSD ? " · pago y cobro en US$" : " · pago y cobro en Q") : ""}</div>
         {esUSD ? (
           <div className="tut-rate">
-            <div className="rh"></div><div className="rh">Pago al tutor (Q)</div><div className="rh">Cobro al alumno (US$)</div><div className="rh"></div>
+            <div className="rh"></div><div className="rh">Pago al tutor (US$)</div><div className="rh">Cobro al alumno (US$)</div><div className="rh"></div>
             <div className="rl">Presencial</div>
             <input className="money" inputMode="decimal" value={f.pagoPres} onChange={set("pagoPres")} placeholder="0" />
             <input className="money" inputMode="decimal" value={f.cobroPres} onChange={set("cobroPres")} placeholder="0" />
@@ -793,10 +794,10 @@ function TabRelaciones({ org, guardarOrg, showToast }) {
                 </div>
                 <div className="tut-subhead" style={{ marginTop: 0 }}>Días ({fmtDias(r.dias)})</div>
                 <DiasSelector value={r.dias} onChange={(d) => editarDias(r.id, d)} />
-                <div className="tut-subhead">Montos · pago en Q{rUSD ? ", cobro en US$" : ", cobro en Q"}</div>
+                <div className="tut-subhead">Montos · {rUSD ? "pago y cobro en US$" : "pago y cobro en Q"}</div>
                 {rUSD ? (
                   <div className="tut-rate">
-                    <div className="rh"></div><div className="rh">Pago al tutor (Q)</div><div className="rh">Cobro al alumno (US$)</div><div className="rh"></div>
+                    <div className="rh"></div><div className="rh">Pago al tutor (US$)</div><div className="rh">Cobro al alumno (US$)</div><div className="rh"></div>
                     <div className="rl">Presencial</div>
                     <MoneyInput value={r.pagoPres} onCommit={(v) => editar(r.id, "pagoPres", v)} />
                     <MoneyInput value={r.cobroPres} onCommit={(v) => editar(r.id, "cobroPres", v)} />
@@ -869,7 +870,8 @@ function TabDinero({ org, guardarOrg, noLeidas, onMarcarLeidas, mes, showToast }
   const porAlumnoPersonal = pid ? org.alumnos.map((a) => { const ss = sesionesMes.filter((s) => esP(s) && s.alumnoId === a.id); return { nombre: a.nombre, total: ss.reduce((x, s) => x + (s.cobro || 0), 0), min: ss.reduce((x, s) => x + s.duracion, 0), n: ss.length }; }).filter((x) => x.n > 0).sort((a, b) => b.total - a.total) : [];
 
   const porAlumno = useMemo(() => org.alumnos.map((a) => { const ss = sesionesMesEmpresa.filter((s) => s.alumnoId === a.id); return { nombre: a.nombre, moneda: a.moneda || "Q", total: ss.reduce((x, s) => x + (s.cobro || 0), 0), min: ss.reduce((x, s) => x + s.duracion, 0), n: ss.length }; }).filter((x) => x.n > 0).sort((x, y) => y.total - x.total), [org.alumnos, sesionesMesEmpresa]);
-  const porTutor = useMemo(() => org.tutores.filter((t) => t.id !== pid).map((t) => { const ss = sesionesMes.filter((s) => s.tutorId === t.id); return { nombre: t.nombre, total: ss.reduce((x, s) => x + (s.pago || 0), 0), min: ss.reduce((x, s) => x + s.duracion, 0), n: ss.length }; }).filter((x) => x.n > 0).sort((x, y) => y.total - x.total), [org.tutores, sesionesMes, pid]);
+  const porTutor = useMemo(() => org.tutores.filter((t) => t.id !== pid).map((t) => { const ss = sesionesMes.filter((s) => s.tutorId === t.id && (s.moneda || "Q") === "Q"); return { nombre: t.nombre, total: ss.reduce((x, s) => x + (s.pago || 0), 0), min: ss.reduce((x, s) => x + s.duracion, 0), n: ss.length }; }).filter((x) => x.n > 0).sort((x, y) => y.total - x.total), [org.tutores, sesionesMes, pid]);
+  const porTutorUSD = useMemo(() => org.tutores.filter((t) => t.id !== pid).map((t) => { const ss = sesionesMes.filter((s) => s.tutorId === t.id && s.moneda === "USD"); return { nombre: t.nombre, total: ss.reduce((x, s) => x + (s.pago || 0), 0), min: ss.reduce((x, s) => x + s.duracion, 0), n: ss.length }; }).filter((x) => x.n > 0).sort((x, y) => y.total - x.total), [org.tutores, sesionesMes, pid]);
 
   const periodo = fmtPeriodo(mes);
 
@@ -916,9 +918,15 @@ function TabDinero({ org, guardarOrg, noLeidas, onMarcarLeidas, mes, showToast }
             {hayUSD && <div className="tut-sumrow"><b>Total en US$</b><span className="amt">{fmtMon(ingresosUSD, "USD")}</span></div>}
           </div>
           <div className="tut-card">
-            <h2>Por pagar a cada tutor (Q)</h2>
-            <p className="sub">Lo generado a favor de cada tutor en {periodo.toLowerCase()}. Siempre en quetzales. El detalle por cuenta está en Cuentas y pagos.</p>
+            <h2>Por pagar a cada tutor</h2>
+            <p className="sub">Lo generado a favor de cada tutor en {periodo.toLowerCase()}, en su moneda. El detalle por cuenta está en Cuentas y pagos.</p>
             {porTutor.map((x) => <div className="tut-sumrow" key={x.nombre}><span>{x.nombre} <span style={{ color: "var(--ink-soft)" }}>· {x.n} ses · {fmtDur(x.min)}</span></span><span className="amt">{fmtQ(x.total)}</span></div>)}
+            {porTutorUSD.length > 0 && (
+              <>
+                <div className="tut-subhead" style={{ marginTop: 8 }}>Tutorías en US$ (otra cuenta)</div>
+                {porTutorUSD.map((x) => <div className="tut-sumrow" key={x.nombre}><span>{x.nombre} <span style={{ color: "var(--ink-soft)" }}>· {x.n} ses · {fmtDur(x.min)}</span></span><span className="amt">{fmtMon(x.total, "USD")}</span></div>)}
+              </>
+            )}
           </div>
         </div>
       )}
@@ -1261,26 +1269,27 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
   const alumnosQ = sortSaldo(org.alumnos.filter((a) => (a.moneda || "Q") === "Q").map(filaAlumno)).filter((f) => !soloDeudores || f.generado - f.pagado > 0.005);
   const alumnosUSD = sortSaldo(org.alumnos.filter((a) => a.moneda === "USD").map(filaAlumno)).filter((f) => !soloDeudores || f.generado - f.pagado > 0.005);
 
-  // --- TUTORES: separar el devengado según la moneda del alumno de cada sesión ---
-  const filasTutoresQ = org.tutores.filter((t) => t.id !== pidC).map((t) => {
-    const devengado = org.sesiones.filter((s) => s.tutorId === t.id && (s.moneda || "Q") === "Q" && enPeriodo(s.fecha)).reduce((x, s) => x + (s.pago || 0), 0);
-    const movs = org.pagos.filter((p) => p.tutorId === t.id && enPeriodo(p.fecha));
-    const pagado = movs.reduce((x, p) => x + (p.monto || 0), 0);
-    return { id: t.id, nombre: t.nombre, moneda: "Q", generado: devengado, pagado, movs };
-  }).filter((f) => f.generado > 0 || f.pagado > 0);
-  // Tutorías de alumnos en US$: el pago al tutor es en Q pero de otra cuenta. Solo registro, sin cuadre.
-  const tutoresOtraCuenta = org.tutores.map((t) => {
-    const devengado = org.sesiones.filter((s) => s.tutorId === t.id && s.moneda === "USD" && enPeriodo(s.fecha)).reduce((x, s) => x + (s.pago || 0), 0);
-    const movs = (org.pagosUSD || []).filter((p) => p.tutorId === t.id && enPeriodo(p.fecha));
-    const pagado = movs.reduce((x, p) => x + (p.monto || 0), 0);
-    return { id: t.id, nombre: t.nombre, moneda: "Q", generado: devengado, pagado, movs };
-  }).filter((f) => f.generado > 0 || f.pagado > 0);
+  // --- TUTORES: una fila por tutor, con su devengado/pagado en Q y en US$ (otra cuenta) por separado ---
+  const filasTutores = org.tutores.filter((t) => t.id !== pidC).map((t) => {
+    const movsQ = org.pagos.filter((p) => p.tutorId === t.id && enPeriodo(p.fecha));
+    const generadoQ = org.sesiones.filter((s) => s.tutorId === t.id && (s.moneda || "Q") === "Q" && enPeriodo(s.fecha)).reduce((x, s) => x + (s.pago || 0), 0);
+    const pagadoQ = movsQ.reduce((x, p) => x + (p.monto || 0), 0);
+    const movsUSD = (org.pagosUSD || []).filter((p) => p.tutorId === t.id && enPeriodo(p.fecha));
+    const generadoUSD = org.sesiones.filter((s) => s.tutorId === t.id && s.moneda === "USD" && enPeriodo(s.fecha)).reduce((x, s) => x + (s.pago || 0), 0);
+    const pagadoUSD = movsUSD.reduce((x, p) => x + (p.monto || 0), 0);
+    return {
+      id: t.id, nombre: t.nombre,
+      q: { generado: generadoQ, pagado: pagadoQ, movs: movsQ },
+      usd: { generado: generadoUSD, pagado: pagadoUSD, movs: movsUSD },
+    };
+  }).filter((f) => f.q.generado > 0 || f.q.pagado > 0 || f.usd.generado > 0 || f.usd.pagado > 0)
+    .sort((a, b) => (b.q.generado - b.q.pagado + (b.usd.generado - b.usd.pagado)) - (a.q.generado - a.q.pagado + (a.usd.generado - a.usd.pagado)));
 
   // --- Totales de cabecera (siguen el filtro de período) ---
   const debenQ = alumnosQ.reduce((x, f) => x + Math.max(0, f.generado - f.pagado), 0);
   const debenUSD = alumnosUSD.reduce((x, f) => x + Math.max(0, f.generado - f.pagado), 0);
-  const debesTutoresQ = filasTutoresQ.reduce((x, f) => x + Math.max(0, f.generado - f.pagado), 0);
-  const debesOtraCuenta = tutoresOtraCuenta.reduce((x, f) => x + Math.max(0, f.generado - f.pagado), 0);
+  const debesTutoresQ = filasTutores.reduce((x, f) => x + Math.max(0, f.q.generado - f.q.pagado), 0);
+  const debesOtraCuenta = filasTutores.reduce((x, f) => x + Math.max(0, f.usd.generado - f.usd.pagado), 0);
 
   // --- Conciliación: SOLO quetzales. Siempre datos totales, no filtrados por período. ---
   const conc = org.conciliacion || { guardado: 0, banco: 0 };
@@ -1312,7 +1321,7 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
         <div className="tut-stat"><div className="v neg">{fmtQ(debenQ)}</div><div className="l">Te deben (Q)</div></div>
         <div className="tut-stat"><div className="v neg">{fmtMon(debenUSD, "USD")}</div><div className="l">Te deben (US$)</div></div>
         <div className="tut-stat"><div className="v neg">{fmtQ(debesTutoresQ)}</div><div className="l">Debes a tutores (Q)</div></div>
-        <div className="tut-stat"><div className="v neg">{fmtQ(debesOtraCuenta)}</div><div className="l">Tutores otra cuenta (Q)</div></div>
+        <div className="tut-stat"><div className="v neg">{fmtMon(debesOtraCuenta, "USD")}</div><div className="l">Debes a tutores (US$, otra cuenta)</div></div>
       </div>
 
       {/* Conciliación: solo quetzales */}
@@ -1322,8 +1331,8 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
         <div style={{ maxWidth: 460 }}>
           <div className="tut-sumrow">
             <span>Saldo guardado (inicial)</span>
-            <MoneyInput value={conc.guardado || 0} onCommit={(v) => setConc("guardado", v)}
-              style={{ width: 120, fontFamily: "Space Grotesk", textAlign: "right", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 9px" }} />
+            <MoneyInput value={conc.guardado || 0} onCommit={(v) => setConc("guardado", v)} mon="Q"
+              style={{ width: 140, fontFamily: "Space Grotesk", textAlign: "right", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 9px" }} />
           </div>
           <div className="tut-sumrow">
             <span>+ Ganancia del año</span>
@@ -1339,8 +1348,8 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
           </div>
           <div className="tut-sumrow" style={{ marginTop: 10 }}>
             <span>Banco actual</span>
-            <MoneyInput value={conc.banco || 0} onCommit={(v) => setConc("banco", v)}
-              style={{ width: 120, fontFamily: "Space Grotesk", textAlign: "right", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 9px" }} />
+            <MoneyInput value={conc.banco || 0} onCommit={(v) => setConc("banco", v)} mon="Q"
+              style={{ width: 140, fontFamily: "Space Grotesk", textAlign: "right", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 9px" }} />
           </div>
           <div className="tut-sumrow" style={{ marginTop: 4 }}>
             <b>{cuadra ? "Cuadra" : "Descuadre"}</b>
@@ -1383,31 +1392,22 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
           )}
         </div>
 
-        {/* Columna derecha: pagos a tutores */}
+        {/* Columna derecha: pagos a tutores (Q y, si aplica, US$ de otra cuenta) */}
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <div className="tut-card">
-            <h2>Pagos a tutores (Q)</h2>
-            <p className="sub">Lo generado menos lo que ya le pagaste. Cuadra con el banco principal.</p>
-            {filasTutoresQ.length === 0 ? <div className="tut-empty">Nada por aquí todavía.</div> : (
-              <div className="tut-list">{filasTutoresQ.map((f) => (
-                <FilaCuenta key={f.id} fila={f} modo="tutores" mon="Q"
-                  onRegistrar={(monto, fecha, nota) => { agregarMov("pagos", { id: uid(), tutorId: f.id, monto, fecha, nota }); showToast("Pago al tutor registrado."); }}
-                  onEliminar={(mid) => eliminarMov("pagos", mid)} />
+            <h2>Pagos a tutores</h2>
+            <p className="sub">Lo generado menos lo que ya le pagaste. Las tutorías en Q cuadran con el banco principal; las tutorías en US$ son de otra cuenta y no entran en la conciliación de caja.</p>
+            {filasTutores.length === 0 ? <div className="tut-empty">Nada por aquí todavía.</div> : (
+              <div className="tut-list">{filasTutores.map((f) => (
+                <FilaTutor key={f.id} fila={f}
+                  onRegistrarQ={(monto, fecha, nota) => { agregarMov("pagos", { id: uid(), tutorId: f.id, monto, fecha, nota }); showToast("Pago al tutor registrado."); }}
+                  onEliminarQ={(mid) => eliminarMov("pagos", mid)}
+                  onRegistrarUSD={(monto, fecha, nota) => { agregarMov("pagosUSD", { id: uid(), tutorId: f.id, monto, fecha, nota }); showToast("Pago al tutor registrado (otra cuenta, US$)."); }}
+                  onEliminarUSD={(mid) => eliminarMov("pagosUSD", mid)} />
               ))}</div>
             )}
+            {debesOtraCuenta > 0.005 && <div className="tut-sumrow" style={{ marginTop: 8 }}><b>Total pendiente de otra cuenta (US$)</b><span className="amt">{fmtMon(debesOtraCuenta, "USD")}</span></div>}
           </div>
-          {tutoresOtraCuenta.length > 0 && (
-            <div className="tut-card">
-              <h2>Pagos a tutores · tutorías US$ (otra cuenta)</h2>
-              <p className="sub">En quetzales, de otra cuenta. No entra en el cuadre del banco.</p>
-              <div className="tut-list">{tutoresOtraCuenta.map((f) => (
-                <FilaCuenta key={f.id} fila={f} modo="tutores" mon="Q"
-                  onRegistrar={(monto, fecha, nota) => { agregarMov("pagosUSD", { id: uid(), tutorId: f.id, monto, fecha, nota }); showToast("Pago al tutor registrado (otra cuenta)."); }}
-                  onEliminar={(mid) => eliminarMov("pagosUSD", mid)} />
-              ))}</div>
-              <div className="tut-sumrow" style={{ marginTop: 8 }}><b>Total pendiente de otra cuenta</b><span className="amt">{fmtQ(debesOtraCuenta)}</span></div>
-            </div>
-          )}
         </div>
       </div>
     </>
@@ -1443,7 +1443,11 @@ function FilaCuenta({ fila, modo, mon = "Q", onRegistrar, onEliminar }) {
       {abrirForm && (
         <div className="tut-money" style={{ alignItems: "flex-end" }}>
           <div className="blk"><label>Fecha</label><input type="date" value={fecha} max={hoy()} onChange={(e) => setFecha(e.target.value)} style={{ width: 150 }} /></div>
-          <div className="blk"><label>Monto ({SIM[mon]})</label><input inputMode="decimal" value={monto} onChange={(e) => setMonto(e.target.value.replace(/[^\d.]/g, ""))} placeholder="0" /></div>
+          <div className="blk">
+            <label>Monto ({SIM[mon]})</label>
+            <input inputMode="decimal" value={monto} onChange={(e) => setMonto(e.target.value.replace(/[^\d.]/g, ""))} placeholder="0" />
+            {saldo > 0.005 && <button type="button" className="tut-link" style={{ display: "block", marginTop: 4, whiteSpace: "nowrap" }} onClick={() => setMonto(String(Math.round(saldo * 100) / 100))}>Usar total ({fmtMon(saldo, mon)})</button>}
+          </div>
           <div className="blk" style={{ flex: 1, minWidth: 140 }}><label>Nota (opcional)</label><input value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Efectivo, transferencia…" style={{ width: "100%", fontFamily: "Inter" }} /></div>
           <button className="tut-btn sm" disabled={!ok} onClick={registrar}>Guardar</button>
         </div>
@@ -1465,6 +1469,78 @@ function FilaCuenta({ fila, modo, mon = "Q", onRegistrar, onEliminar }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/* Un bloque de una sola moneda (generado/pagado/saldo + form de pago + historial). Lo reutiliza FilaTutor para mostrar Q y US$ en la misma fila. */
+function BloqueMoneda({ titulo, mon, generado, pagado, movs, onRegistrar, onEliminar, separador }) {
+  const [abrirForm, setAbrirForm] = useState(false);
+  const [verMovs, setVerMovs] = useState(false);
+  const [monto, setMonto] = useState(""); const [fecha, setFecha] = useState(hoy()); const [nota, setNota] = useState("");
+  const saldo = generado - pagado;
+  const ok = num(monto) > 0 && fecha;
+  const movsOrden = [...movs].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
+
+  const registrar = () => { if (!ok) return; onRegistrar(num(monto), fecha, nota.trim()); setMonto(""); setNota(""); setFecha(hoy()); setAbrirForm(false); setVerMovs(true); };
+
+  const estado = saldo > 0.001 ? { txt: `Saldo: ${fmtMon(saldo, mon)}`, cls: "neg" } : saldo < -0.001 ? { txt: `A favor: ${fmtMon(-saldo, mon)}`, cls: "pos" } : { txt: "Al día", cls: "pos" };
+
+  return (
+    <div style={separador ? { marginTop: 10, paddingTop: 10, borderTop: "1px dashed var(--line)" } : undefined}>
+      <div className="tut-item-row">
+        <div>
+          {titulo && <div className="meta" style={{ color: "var(--accent)", fontWeight: 600 }}>{titulo}</div>}
+          <div className="meta">Generado <b>{fmtMon(generado, mon)}</b> · ya pagado <b>{fmtMon(pagado, mon)}</b></div>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div className="name" style={{ color: estado.cls === "neg" ? "var(--neg)" : "var(--pos)", fontSize: 13 }}>{estado.txt}</div>
+          <button className="tut-btn ghost sm" style={{ marginTop: 6 }} onClick={() => setAbrirForm((v) => !v)}>Pagar {SIM[mon]}</button>
+        </div>
+      </div>
+
+      {abrirForm && (
+        <div className="tut-money" style={{ alignItems: "flex-end" }}>
+          <div className="blk"><label>Fecha</label><input type="date" value={fecha} max={hoy()} onChange={(e) => setFecha(e.target.value)} style={{ width: 150 }} /></div>
+          <div className="blk">
+            <label>Monto ({SIM[mon]})</label>
+            <input inputMode="decimal" value={monto} onChange={(e) => setMonto(e.target.value.replace(/[^\d.]/g, ""))} placeholder="0" />
+            {saldo > 0.005 && <button type="button" className="tut-link" style={{ display: "block", marginTop: 4, whiteSpace: "nowrap" }} onClick={() => setMonto(String(Math.round(saldo * 100) / 100))}>Usar total ({fmtMon(saldo, mon)})</button>}
+          </div>
+          <div className="blk" style={{ flex: 1, minWidth: 140 }}><label>Nota (opcional)</label><input value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Efectivo, transferencia…" style={{ width: "100%", fontFamily: "Inter" }} /></div>
+          <button className="tut-btn sm" disabled={!ok} onClick={registrar}>Guardar</button>
+        </div>
+      )}
+
+      {movs.length > 0 && (
+        <div style={{ marginTop: 10 }}>
+          <button className="tut-link" onClick={() => setVerMovs((v) => !v)}>{verMovs ? "Ocultar" : "Ver"} pagos registrados ({movs.length})</button>
+          {verMovs && (
+            <div style={{ marginTop: 8 }}>
+              {movsOrden.map((m) => (
+                <div className="tut-sumrow" key={m.id}>
+                  <span>{fmtFecha(m.fecha)}{m.nota ? <span style={{ color: "var(--ink-soft)" }}> · {m.nota}</span> : null}</span>
+                  <span style={{ display: "flex", alignItems: "center", gap: 12 }}><span className="amt">{fmtMon(m.monto, mon)}</span>
+                    <button className="tut-link" style={{ color: "var(--neg)" }} onClick={() => onEliminar(m.id)}>Quitar</button></span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Fila de un tutor: bloque en Q (tutorías normales) y, si aplica, bloque en US$ (tutorías de otra cuenta) en la misma tarjeta. */
+function FilaTutor({ fila, onRegistrarQ, onEliminarQ, onRegistrarUSD, onEliminarUSD }) {
+  const tieneQ = fila.q.generado > 0 || fila.q.pagado > 0;
+  const tieneUSD = fila.usd.generado > 0 || fila.usd.pagado > 0;
+  return (
+    <div className="tut-item">
+      <div className="name">{fila.nombre}</div>
+      {tieneQ && <BloqueMoneda mon="Q" generado={fila.q.generado} pagado={fila.q.pagado} movs={fila.q.movs} onRegistrar={onRegistrarQ} onEliminar={onEliminarQ} />}
+      {tieneUSD && <BloqueMoneda titulo="Tutorías US$" mon="USD" generado={fila.usd.generado} pagado={fila.usd.pagado} movs={fila.usd.movs} onRegistrar={onRegistrarUSD} onEliminar={onEliminarUSD} separador={tieneQ} />}
     </div>
   );
 }
