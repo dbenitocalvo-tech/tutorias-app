@@ -187,6 +187,7 @@ const Styles = () => (
     .tut-cal .day .ses { font-size:10.5px; line-height:1.3; background:var(--sky); color:#1E4E8C; border-radius:5px; padding:2px 5px; margin-bottom:2px; }
     .tut-cal .day .ses b { font-weight:700; }
     .tut-cal .day .ses.usd { background:var(--accent-soft); color:var(--accent); }
+    .tut-cal .day .ses.personal { background:var(--ok-soft); color:var(--primary-dark); }
 
     @media (max-width:680px){
       .tut-grid,.tut-grid.three{grid-template-columns:1fr} .tut-stats{grid-template-columns:1fr 1fr}
@@ -1051,6 +1052,7 @@ function CalendarioMes({ org, mes }) {
   const [y, m] = mesCal.split("-").map(Number);
   const nT = (id) => org.tutores.find((t) => t.id === id)?.nombre || "—";
   const nA = (id) => org.alumnos.find((a) => a.id === id)?.nombre || "—";
+  const pidCal = org.personalTutorId || null;
 
   const porDia = useMemo(() => {
     const map = new Map();
@@ -1082,7 +1084,7 @@ function CalendarioMes({ org, mes }) {
               <div className={`day${fecha === hoy() ? " hoy" : ""}`} key={fecha}>
                 <div className="num">{d}</div>
                 {items.map((s) => (
-                  <div className={`ses${s.moneda === "USD" ? " usd" : ""}`} key={s.id} title={`${nA(s.alumnoId)} · ${nT(s.tutorId)} · ${fmtDur(s.duracion)}`}>
+                  <div className={`ses${pidCal && s.tutorId === pidCal ? " personal" : s.moneda === "USD" ? " usd" : ""}`} key={s.id} title={`${nA(s.alumnoId)} · ${nT(s.tutorId)} · ${fmtDur(s.duracion)}`}>
                     <b>{nA(s.alumnoId)}</b> · {nT(s.tutorId)} · {fmtDur(s.duracion)}
                   </div>
                 ))}
@@ -1737,7 +1739,12 @@ function VistaTutor({ org, tutor, guardarOrg, showToast }) {
   // Financiero: sobre TODAS las sesiones del periodo (sin filtro alumno/mod)
   const todasEnPeriodo = useMemo(() => org.sesiones.filter((s) => s.tutorId === tutor.id && enMes(s.fecha, per)), [org.sesiones, tutor.id, per]);
   const totalDevengado = todasEnPeriodo.reduce((a, s) => a + (s.pago || 0), 0);
-  const pagosRecibidos = useMemo(() => (org.pagos || []).filter((p) => p.tutorId === tutor.id && enMes(p.fecha, per)), [org.pagos, tutor.id, per]);
+  // Se suman los pagos de la cuenta principal (Q) y los de otra cuenta (tutorías de alumnos en $):
+  // al tutor le pagan lo mismo (en Q) sin importar de qué cuenta salga, así que su vista no distingue.
+  const pagosRecibidos = useMemo(() => [
+    ...(org.pagos || []).filter((p) => p.tutorId === tutor.id && enMes(p.fecha, per)),
+    ...(org.pagosUSD || []).filter((p) => p.tutorId === tutor.id && enMes(p.fecha, per)),
+  ], [org.pagos, org.pagosUSD, tutor.id, per]);
   const totalRecibido = pagosRecibidos.reduce((a, p) => a + (p.monto || 0), 0);
   const pendiente = totalDevengado - totalRecibido;
 
