@@ -189,6 +189,11 @@ const Styles = () => (
     .tut-cal .day .ses.usd { background:var(--accent-soft); color:var(--accent); }
     .tut-cal .day .ses.personal { background:var(--ok-soft); color:var(--primary-dark); }
 
+    .tut-cal-resumen { background:var(--ok-soft); border:1px solid var(--line); border-radius:12px; padding:10px 16px; text-align:right; min-width:180px; flex-shrink:0; }
+    .tut-cal-resumen .t { font-family:'Space Grotesk'; font-weight:700; font-size:13.5px; margin-bottom:2px; }
+    .tut-cal-resumen .v { font-family:'Space Grotesk'; font-weight:700; font-size:19px; font-variant-numeric:tabular-nums; color:var(--primary-dark); }
+    .tut-cal-resumen .l { font-size:11.5px; color:var(--ink-soft); }
+
     @media (max-width:680px){
       .tut-grid,.tut-grid.three{grid-template-columns:1fr} .tut-stats{grid-template-columns:1fr 1fr}
       .tut-money .margen{margin-left:0;text-align:left;width:100%}
@@ -1054,6 +1059,7 @@ function CalendarioMes({ org, mes }) {
   const [y, m] = mesCal.split("-").map(Number);
   const nT = (id) => org.tutores.find((t) => t.id === id)?.nombre || "—";
   const nA = (id) => org.alumnos.find((a) => a.id === id)?.nombre || "—";
+  const monAl = (id) => org.alumnos.find((a) => a.id === id)?.moneda || "Q";
   const pidCal = org.personalTutorId || null;
 
   const [fTutor, setFTutor] = useState("");
@@ -1065,6 +1071,61 @@ function CalendarioMes({ org, mes }) {
     .filter((s) => !fTutor || s.tutorId === fTutor)
     .filter((s) => !fAlumno || s.alumnoId === fAlumno)
     .filter((s) => !fMod || s.modalidad === fMod), [org.sesiones, mesCal, fTutor, fAlumno, fMod]);
+
+  // Caja de resumen arriba a la derecha: cambia según qué filtro está activo (tutor > alumno > modalidad > ninguno).
+  const resumen = useMemo(() => {
+    if (fTutor) {
+      const t = org.tutores.find((x) => x.id === fTutor);
+      const total = sesMes.reduce((a, s) => a + (s.pago || 0), 0);
+      const pres = sesMes.filter((s) => s.modalidad === PRES).reduce((a, s) => a + (s.pago || 0), 0);
+      const lin = sesMes.filter((s) => s.modalidad === LINEA).reduce((a, s) => a + (s.pago || 0), 0);
+      return (
+        <div className="tut-cal-resumen">
+          <div className="t">{t?.nombre || "Tutor"}</div>
+          <div className="v">{fmtQ(total)}</div>
+          <div className="l">generado en {fmtMes(mesCal)}</div>
+          {pres > 0 && <div className="l" style={{ marginTop: 4 }}>Presencial: <b>{fmtQ(pres)}</b></div>}
+          {lin > 0 && <div className="l">En línea: <b>{fmtQ(lin)}</b></div>}
+        </div>
+      );
+    }
+    if (fAlumno) {
+      const a = org.alumnos.find((x) => x.id === fAlumno);
+      const gen = org.sesiones.filter((s) => s.alumnoId === fAlumno).reduce((x, s) => x + (s.cobro || 0), 0);
+      const pag = org.cobros.filter((c) => c.alumnoId === fAlumno).reduce((x, c) => x + (c.monto || 0), 0);
+      const debe = Math.max(0, gen - pag);
+      return (
+        <div className="tut-cal-resumen">
+          <div className="t">{a?.nombre || "Alumno"}</div>
+          <div className="v">{fmtMon(debe, monAl(fAlumno))}</div>
+          <div className="l">debe en total</div>
+        </div>
+      );
+    }
+    if (fMod) {
+      const ss = sesMes.filter((s) => (s.moneda || "Q") === "Q" && (!pidCal || s.tutorId !== pidCal));
+      const ing = ss.reduce((a, s) => a + (s.cobro || 0), 0);
+      const pag = ss.reduce((a, s) => a + (s.pago || 0), 0);
+      return (
+        <div className="tut-cal-resumen">
+          <div className="t">{fMod} (Q)</div>
+          <div className="l">Te pagaron: <b>{fmtQ(ing)}</b></div>
+          <div className="l">Pagaste a tutores: <b>{fmtQ(pag)}</b></div>
+          <div className="v" style={{ marginTop: 4 }}>{fmtQ(ing - pag)}</div>
+          <div className="l">ganancia</div>
+        </div>
+      );
+    }
+    const ss = sesMes.filter((s) => (s.moneda || "Q") === "Q" && (!pidCal || s.tutorId !== pidCal));
+    const ing = ss.reduce((a, s) => a + (s.cobro || 0), 0);
+    const pag = ss.reduce((a, s) => a + (s.pago || 0), 0);
+    return (
+      <div className="tut-cal-resumen">
+        <div className="v">{fmtQ(ing - pag)}</div>
+        <div className="l">ganancia de tutorías (Q) en {fmtMes(mesCal)}</div>
+      </div>
+    );
+  }, [fTutor, fAlumno, fMod, sesMes, org, pidCal, mesCal]);
 
   const porDia = useMemo(() => {
     const map = new Map();
@@ -1085,8 +1146,13 @@ function CalendarioMes({ org, mes }) {
 
   return (
     <div className="tut-card">
-      <h2>Calendario · {fmtMes(mesCal)}</h2>
-      <p className="sub">Qué alumno recibió clase, con qué tutor y cuánto tiempo, día por día. Usa el selector de mes de arriba para ver meses anteriores.</p>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 14, marginBottom: 4 }}>
+        <div>
+          <h2 style={{ margin: 0 }}>Calendario · {fmtMes(mesCal)}</h2>
+          <p className="sub" style={{ margin: "4px 0 0" }}>Qué alumno recibió clase, con qué tutor y cuánto tiempo, día por día. Usa el selector de mes de arriba para ver meses anteriores.</p>
+        </div>
+        {resumen}
+      </div>
       <div className="tut-filters" style={{ marginBottom: 14 }}>
         <select value={fTutor} onChange={(e) => setFTutor(e.target.value)}><option value="">Todos los tutores</option>{org.tutores.map((t) => <option key={t.id} value={t.id}>{t.nombre}</option>)}</select>
         <select value={fAlumno} onChange={(e) => setFAlumno(e.target.value)}><option value="">Todos los alumnos</option>{org.alumnos.map((a) => <option key={a.id} value={a.id}>{a.nombre}</option>)}</select>
@@ -1122,6 +1188,8 @@ function CalendarioMes({ org, mes }) {
 function TabPlaneacion({ org, guardarOrg, mes, showToast }) {
   const nT = (id) => org.tutores.find((t) => t.id === id)?.nombre || "—";
   const nA = (id) => org.alumnos.find((a) => a.id === id)?.nombre || "—";
+  const monA = (id) => org.alumnos.find((a) => a.id === id)?.moneda || "Q";
+  const pidP = org.personalTutorId || null;
   const planes = org.planes || [];
 
   const blank = { tutorId: "", alumnoId: "", dias: [], horas: "1", minutos: "0" };
@@ -1162,23 +1230,30 @@ function TabPlaneacion({ org, guardarOrg, mes, showToast }) {
 
       <div className="tut-card">
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 4 }}>
-          <h2 style={{ margin: 0 }}>Plan actual ({planes.length})</h2>
+          <h2 style={{ margin: 0 }}>Plan de la semana ({planes.length})</h2>
           {planes.length > 0 && <BotonConfirma onConfirm={vaciarTodo}>Vaciar todo</BotonConfirma>}
         </div>
-        <p className="sub">Tentativo, no afecta dinero ni clases registradas.</p>
+        <p className="sub">Tentativo, no afecta dinero ni clases registradas. Toca la × para quitar uno.</p>
         {planes.length === 0 ? <div className="tut-empty">Nada planeado todavía.</div> : (
-          <div className="tut-list">
-            {planes.map((p) => (
-              <div className="tut-item" key={p.id}>
-                <div className="tut-item-row">
-                  <div>
-                    <div className="name">{nA(p.alumnoId)} <span style={{ color: "var(--ink-soft)", fontWeight: 400 }}>con</span> {nT(p.tutorId)}</div>
-                    <div className="meta">{fmtDias(p.dias)} · {fmtDur(p.duracion)}</div>
+          <div className="tut-cal-wrap">
+            <div className="tut-cal">
+              {DOW.map((d) => <div className="dow" key={d}>{d}</div>)}
+              {DOW.map((_, i) => {
+                const items = planes.filter((p) => (p.dias || []).includes(i));
+                return (
+                  <div className="day" key={i}>
+                    {items.map((p) => (
+                      <div className={`ses${pidP && p.tutorId === pidP ? " personal" : monA(p.alumnoId) === "USD" ? " usd" : ""}`} key={p.id}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 4 }}>
+                          <span><b>{nA(p.alumnoId)}</b> · {nT(p.tutorId)} · {fmtDur(p.duracion)}</span>
+                          <button aria-label="Quitar" onClick={() => eliminar(p.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", opacity: .6, fontWeight: 700, lineHeight: 1, padding: 0, flexShrink: 0 }}>×</button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  <BotonConfirma onConfirm={() => eliminar(p.id)} />
-                </div>
-              </div>
-            ))}
+                );
+              })}
+            </div>
           </div>
         )}
       </div>
