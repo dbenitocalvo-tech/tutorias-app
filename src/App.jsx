@@ -1199,20 +1199,32 @@ function TabPlaneacion({ org, guardarOrg, mes, showToast }) {
   const pidP = org.personalTutorId || null;
   const planes = org.planes || [];
 
-  const blank = { tutorId: "", alumnoId: "", dias: [], horas: "1", minutos: "0" };
+  const blank = { tutorId: "", alumnoId: "", modalidad: "", dias: [], horas: "1", minutos: "0" };
   const [f, setF] = useState(blank);
   const dur = (+f.horas || 0) * 60 + (+f.minutos || 0);
-  const ok = f.tutorId && f.alumnoId && f.dias.length > 0 && dur > 0;
+  const ok = f.tutorId && f.alumnoId && f.modalidad && f.dias.length > 0 && dur > 0;
+
+  // Solo alumnos que ese tutor realmente da (según las relaciones de precio), igual que al registrar una clase.
+  const alumnosDelTutor = useMemo(() => org.alumnos.filter((a) => org.relaciones.some((r) => r.tutorId === f.tutorId && r.alumnoId === a.id)), [org.alumnos, org.relaciones, f.tutorId]);
+  useEffect(() => { if (f.alumnoId && !alumnosDelTutor.some((a) => a.id === f.alumnoId)) setF((p) => ({ ...p, alumnoId: "" })); }, [f.tutorId]);
 
   const agregar = () => {
     if (!ok) return;
-    const plan = { id: uid(), tutorId: f.tutorId, alumnoId: f.alumnoId, dias: f.dias, duracion: dur };
+    const plan = { id: uid(), tutorId: f.tutorId, alumnoId: f.alumnoId, modalidad: f.modalidad, dias: f.dias, duracion: dur };
     guardarOrg({ ...org, planes: [plan, ...planes] }, "agregó plan de la semana");
-    setF(blank);
+    setF({ ...blank, tutorId: f.tutorId }); // deja el tutor puesto, útil para agregar varias del mismo tutor seguido
     showToast("Plan agregado.");
   };
   const eliminar = (id) => guardarOrg({ ...org, planes: planes.filter((p) => p.id !== id) }, "eliminó plan de la semana");
   const vaciarTodo = () => guardarOrg({ ...org, planes: [] }, "vació el plan de la semana");
+
+  const [fPTutor, setFPTutor] = useState("");
+  const [fPAlumno, setFPAlumno] = useState("");
+  const [fPMod, setFPMod] = useState("");
+  const planesFiltrados = planes
+    .filter((p) => !fPTutor || p.tutorId === fPTutor)
+    .filter((p) => !fPAlumno || p.alumnoId === fPAlumno)
+    .filter((p) => !fPMod || p.modalidad === fPMod);
 
   return (
     <>
@@ -1223,7 +1235,13 @@ function TabPlaneacion({ org, guardarOrg, mes, showToast }) {
         <p className="sub">Solo para organizarte: qué alumno tendría clase con qué tutor, qué días y cuánto tiempo. No genera cobros ni pagos — bórralo cuando ya no lo necesites, por ejemplo al iniciar una semana nueva.</p>
         <div className="tut-grid">
           <div className="tut-field"><label>Tutor</label><select value={f.tutorId} onChange={(e) => setF((p) => ({ ...p, tutorId: e.target.value }))}><option value="">Elige</option>{org.tutores.map((t) => <option key={t.id} value={t.id}>{t.nombre}</option>)}</select></div>
-          <div className="tut-field"><label>Alumno</label><select value={f.alumnoId} onChange={(e) => setF((p) => ({ ...p, alumnoId: e.target.value }))}><option value="">Elige</option>{org.alumnos.map((a) => <option key={a.id} value={a.id}>{a.nombre}</option>)}</select></div>
+          <div className="tut-field"><label>Alumno</label>
+            <select value={f.alumnoId} onChange={(e) => setF((p) => ({ ...p, alumnoId: e.target.value }))} disabled={!f.tutorId}>
+              <option value="">{f.tutorId ? "Elige" : "Elige primero el tutor"}</option>{alumnosDelTutor.map((a) => <option key={a.id} value={a.id}>{a.nombre}</option>)}
+            </select>
+            {f.tutorId && alumnosDelTutor.length === 0 && <span className="tut-err">Ese tutor no tiene alumnos asignados todavía.</span>}
+          </div>
+          <div className="tut-field"><label>Modalidad</label><select value={f.modalidad} onChange={(e) => setF((p) => ({ ...p, modalidad: e.target.value }))}><option value="">Elige</option><option>{PRES}</option><option>{LINEA}</option></select></div>
         </div>
         <div className="tut-subhead">Días de la semana</div>
         <DiasSelector value={f.dias} onChange={(d) => setF((p) => ({ ...p, dias: d }))} />
@@ -1237,22 +1255,28 @@ function TabPlaneacion({ org, guardarOrg, mes, showToast }) {
 
       <div className="tut-card">
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 4 }}>
-          <h2 style={{ margin: 0 }}>Plan de la semana ({planes.length})</h2>
+          <h2 style={{ margin: 0 }}>Plan de la semana ({planesFiltrados.length})</h2>
           {planes.length > 0 && <BotonConfirma onConfirm={vaciarTodo}>Vaciar todo</BotonConfirma>}
         </div>
         <p className="sub">Tentativo, no afecta dinero ni clases registradas. Toca la × para quitar uno.</p>
-        {planes.length === 0 ? <div className="tut-empty">Nada planeado todavía.</div> : (
+        <div className="tut-filters" style={{ marginBottom: 14 }}>
+          <select value={fPTutor} onChange={(e) => setFPTutor(e.target.value)}><option value="">Todos los tutores</option>{org.tutores.map((t) => <option key={t.id} value={t.id}>{t.nombre}</option>)}</select>
+          <select value={fPAlumno} onChange={(e) => setFPAlumno(e.target.value)}><option value="">Todos los alumnos</option>{org.alumnos.map((a) => <option key={a.id} value={a.id}>{a.nombre}</option>)}</select>
+          <select value={fPMod} onChange={(e) => setFPMod(e.target.value)}><option value="">Toda modalidad</option><option>{PRES}</option><option>{LINEA}</option></select>
+          {(fPTutor || fPAlumno || fPMod) && <button className="tut-btn ghost sm" onClick={() => { setFPTutor(""); setFPAlumno(""); setFPMod(""); }}>Limpiar</button>}
+        </div>
+        {planes.length === 0 ? <div className="tut-empty">Nada planeado todavía.</div> : planesFiltrados.length === 0 ? <div className="tut-empty">Nada con este filtro.</div> : (
           <div className="tut-cal-wrap">
             <div className="tut-cal">
               {DOW.map((d) => <div className="dow" key={d}>{d}</div>)}
               {DOW.map((_, i) => {
-                const items = planes.filter((p) => (p.dias || []).includes(i));
+                const items = planesFiltrados.filter((p) => (p.dias || []).includes(i));
                 return (
                   <div className="day" key={i}>
                     {items.map((p) => (
                       <div className={`ses${pidP && p.tutorId === pidP ? " personal" : monA(p.alumnoId) === "USD" ? " usd" : ""}`} key={p.id}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 4 }}>
-                          <span><b>{nA(p.alumnoId)}</b> · {nT(p.tutorId)} · {fmtDur(p.duracion)}</span>
+                          <span><b>{nA(p.alumnoId)}</b> · {nT(p.tutorId)} · {fmtDur(p.duracion)} <span className={`tut-pill${p.modalidad === LINEA ? " linea" : ""}`} style={{ fontSize: 9.5, padding: "1px 6px" }}>{p.modalidad === LINEA ? "En línea" : "Presencial"}</span></span>
                           <button aria-label="Quitar" onClick={() => eliminar(p.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", opacity: .6, fontWeight: 700, lineHeight: 1, padding: 0, flexShrink: 0 }}>×</button>
                         </div>
                       </div>
