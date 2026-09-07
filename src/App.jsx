@@ -214,7 +214,7 @@ function fmtFecha(iso) {
   return `${d} ${mm[+m - 1]} ${y}`;
 }
 function fmtDur(min) { const h = Math.floor(min / 60), m = min % 60; if (h && m) return `${h}h ${m}m`; if (h) return `${h}h`; return `${m}m`; }
-const emptyOrg = () => ({ coordinador: null, tutores: [], alumnos: [], relaciones: [], sesiones: [], cobros: [], pagos: [], pagosUSD: [], materias: [], auditoria: [], conciliacion: { guardado: 0, banco: 0 } });
+const emptyOrg = () => ({ coordinador: null, tutores: [], alumnos: [], relaciones: [], sesiones: [], cobros: [], pagos: [], pagosUSD: [], materias: [], auditoria: [], conciliacion: { guardado: 0, banco: 0 }, planes: [] });
 const MESES = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"];
 const mesActual = () => new Date().toISOString().slice(0, 7);
 const fmtMes = (ym) => { const [y, m] = ym.split("-"); return `${MESES[+m - 1]} ${y}`; };
@@ -530,15 +530,17 @@ function PanelCoordinador({ org, guardarOrg, showToast, noLeidas, onMarcarLeidas
       <div className="tut-tabs" role="tablist">
         <button data-on={tab === "dinero"} onClick={() => setTab("dinero")}>Clases y dinero{noLeidas.length > 0 && <span className="pip">{noLeidas.length}</span>}</button>
         <button data-on={tab === "cuentas"} onClick={() => setTab("cuentas")}>Cuentas y pagos</button>
+        <button data-on={tab === "planeacion"} onClick={() => setTab("planeacion")}>Planeación y resumen</button>
         <button data-on={tab === "analisis"} onClick={() => setTab("analisis")}>Análisis</button>
         <button data-on={tab === "relaciones"} onClick={() => setTab("relaciones")}>Relaciones (precios)</button>
         <button data-on={tab === "tutores"} onClick={() => setTab("tutores")}>Tutores</button>
         <button data-on={tab === "alumnos"} onClick={() => setTab("alumnos")}>Alumnos</button>
         <button data-on={tab === "materias"} onClick={() => setTab("materias")}>Materias</button>
       </div>
-      {(conMes || tab === "analisis") && <SelectorMes mes={mes} setMes={setMes} />}
+      {(conMes || tab === "analisis" || tab === "planeacion") && <SelectorMes mes={mes} setMes={setMes} />}
       {tab === "dinero" && <TabDinero org={org} guardarOrg={guardarOrg} noLeidas={noLeidas} onMarcarLeidas={onMarcarLeidas} mes={mes} showToast={showToast} />}
       {tab === "cuentas" && <TabCuentas org={org} guardarOrg={guardarOrg} showToast={showToast} mes={mes} />}
+      {tab === "planeacion" && <TabPlaneacion org={org} guardarOrg={guardarOrg} mes={mes} showToast={showToast} />}
       {tab === "analisis" && <TabAnalisis org={org} mes={mes} />}
       {tab === "relaciones" && <TabRelaciones org={org} guardarOrg={guardarOrg} showToast={showToast} />}
       {tab === "tutores" && <TabTutores org={org} guardarOrg={guardarOrg} showToast={showToast} />}
@@ -1046,7 +1048,7 @@ function TabMaterias({ org, guardarOrg, showToast }) {
   );
 }
 
-/* Calendario del mes: cada día muestra qué alumno recibió clase con qué tutor y cuánto duró. */
+/* Calendario del mes: cada día muestra qué alumno recibió clase con qué tutor y cuánto duró. Filtrable por tutor, alumno y modalidad. */
 function CalendarioMes({ org, mes }) {
   const mesCal = /^\d{4}-\d{2}$/.test(mes) ? mes : mesActual();
   const [y, m] = mesCal.split("-").map(Number);
@@ -1054,14 +1056,24 @@ function CalendarioMes({ org, mes }) {
   const nA = (id) => org.alumnos.find((a) => a.id === id)?.nombre || "—";
   const pidCal = org.personalTutorId || null;
 
+  const [fTutor, setFTutor] = useState("");
+  const [fAlumno, setFAlumno] = useState("");
+  const [fMod, setFMod] = useState("");
+
+  const sesMes = useMemo(() => org.sesiones
+    .filter((s) => (s.fecha || "").startsWith(mesCal))
+    .filter((s) => !fTutor || s.tutorId === fTutor)
+    .filter((s) => !fAlumno || s.alumnoId === fAlumno)
+    .filter((s) => !fMod || s.modalidad === fMod), [org.sesiones, mesCal, fTutor, fAlumno, fMod]);
+
   const porDia = useMemo(() => {
     const map = new Map();
-    org.sesiones.filter((s) => (s.fecha || "").startsWith(mesCal)).forEach((s) => {
+    sesMes.forEach((s) => {
       if (!map.has(s.fecha)) map.set(s.fecha, []);
       map.get(s.fecha).push(s);
     });
     return map;
-  }, [org.sesiones, mesCal]);
+  }, [sesMes]);
 
   const numDias = new Date(y, m, 0).getDate();
   const primerDow = (new Date(y, m - 1, 1).getDay() + 6) % 7; // 0 = lunes
@@ -1069,10 +1081,19 @@ function CalendarioMes({ org, mes }) {
   for (let i = 0; i < primerDow; i++) celdas.push(null);
   for (let d = 1; d <= numDias; d++) celdas.push(d);
 
+  const minTotal = sesMes.reduce((a, s) => a + (s.duracion || 0), 0);
+
   return (
     <div className="tut-card">
       <h2>Calendario · {fmtMes(mesCal)}</h2>
-      <p className="sub">Qué alumno recibió clase, con qué tutor y cuánto tiempo, día por día.</p>
+      <p className="sub">Qué alumno recibió clase, con qué tutor y cuánto tiempo, día por día. Usa el selector de mes de arriba para ver meses anteriores.</p>
+      <div className="tut-filters" style={{ marginBottom: 14 }}>
+        <select value={fTutor} onChange={(e) => setFTutor(e.target.value)}><option value="">Todos los tutores</option>{org.tutores.map((t) => <option key={t.id} value={t.id}>{t.nombre}</option>)}</select>
+        <select value={fAlumno} onChange={(e) => setFAlumno(e.target.value)}><option value="">Todos los alumnos</option>{org.alumnos.map((a) => <option key={a.id} value={a.id}>{a.nombre}</option>)}</select>
+        <select value={fMod} onChange={(e) => setFMod(e.target.value)}><option value="">Toda modalidad</option><option>{PRES}</option><option>{LINEA}</option></select>
+        {(fTutor || fAlumno || fMod) && <button className="tut-btn ghost sm" onClick={() => { setFTutor(""); setFAlumno(""); setFMod(""); }}>Limpiar</button>}
+      </div>
+      {(fTutor || fAlumno || fMod) && <p className="sub" style={{ marginTop: -8 }}>{sesMes.length} clase(s) · {fmtDur(minTotal)} en total con este filtro.</p>}
       <div className="tut-cal-wrap">
         <div className="tut-cal">
           {DOW.map((d) => <div className="dow" key={d}>{d}</div>)}
@@ -1094,6 +1115,74 @@ function CalendarioMes({ org, mes }) {
         </div>
       </div>
     </div>
+  );
+}
+
+/* ---- Tab Planeación y resumen ---- */
+function TabPlaneacion({ org, guardarOrg, mes, showToast }) {
+  const nT = (id) => org.tutores.find((t) => t.id === id)?.nombre || "—";
+  const nA = (id) => org.alumnos.find((a) => a.id === id)?.nombre || "—";
+  const planes = org.planes || [];
+
+  const blank = { tutorId: "", alumnoId: "", dias: [], horas: "1", minutos: "0" };
+  const [f, setF] = useState(blank);
+  const dur = (+f.horas || 0) * 60 + (+f.minutos || 0);
+  const ok = f.tutorId && f.alumnoId && f.dias.length > 0 && dur > 0;
+
+  const agregar = () => {
+    if (!ok) return;
+    const plan = { id: uid(), tutorId: f.tutorId, alumnoId: f.alumnoId, dias: f.dias, duracion: dur };
+    guardarOrg({ ...org, planes: [plan, ...planes] }, "agregó plan de la semana");
+    setF(blank);
+    showToast("Plan agregado.");
+  };
+  const eliminar = (id) => guardarOrg({ ...org, planes: planes.filter((p) => p.id !== id) }, "eliminó plan de la semana");
+  const vaciarTodo = () => guardarOrg({ ...org, planes: [] }, "vació el plan de la semana");
+
+  return (
+    <>
+      <CalendarioMes org={org} mes={mes} />
+
+      <div className="tut-card">
+        <h2>Planeación de la semana (tentativo)</h2>
+        <p className="sub">Solo para organizarte: qué alumno tendría clase con qué tutor, qué días y cuánto tiempo. No genera cobros ni pagos — bórralo cuando ya no lo necesites, por ejemplo al iniciar una semana nueva.</p>
+        <div className="tut-grid">
+          <div className="tut-field"><label>Tutor</label><select value={f.tutorId} onChange={(e) => setF((p) => ({ ...p, tutorId: e.target.value }))}><option value="">Elige</option>{org.tutores.map((t) => <option key={t.id} value={t.id}>{t.nombre}</option>)}</select></div>
+          <div className="tut-field"><label>Alumno</label><select value={f.alumnoId} onChange={(e) => setF((p) => ({ ...p, alumnoId: e.target.value }))}><option value="">Elige</option>{org.alumnos.map((a) => <option key={a.id} value={a.id}>{a.nombre}</option>)}</select></div>
+        </div>
+        <div className="tut-subhead">Días de la semana</div>
+        <DiasSelector value={f.dias} onChange={(d) => setF((p) => ({ ...p, dias: d }))} />
+        <div className="tut-subhead">Duración</div>
+        <div className="tut-dur" style={{ maxWidth: 300 }}>
+          <div><select value={f.horas} onChange={(e) => setF((p) => ({ ...p, horas: e.target.value }))} aria-label="Horas">{[0,1,2,3,4,5,6].map((h) => <option key={h} value={h}>{h} h</option>)}</select></div>
+          <div><select value={f.minutos} onChange={(e) => setF((p) => ({ ...p, minutos: e.target.value }))} aria-label="Minutos">{[0,15,30,45].map((mm) => <option key={mm} value={mm}>{mm} min</option>)}</select></div>
+        </div>
+        <div className="tut-actions"><button className="tut-btn" disabled={!ok} onClick={agregar}>Agregar al plan</button></div>
+      </div>
+
+      <div className="tut-card">
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 4 }}>
+          <h2 style={{ margin: 0 }}>Plan actual ({planes.length})</h2>
+          {planes.length > 0 && <BotonConfirma onConfirm={vaciarTodo}>Vaciar todo</BotonConfirma>}
+        </div>
+        <p className="sub">Tentativo, no afecta dinero ni clases registradas.</p>
+        {planes.length === 0 ? <div className="tut-empty">Nada planeado todavía.</div> : (
+          <div className="tut-list">
+            {planes.map((p) => (
+              <div className="tut-item" key={p.id}>
+                <div className="tut-item-row">
+                  <div>
+                    <div className="name">{nA(p.alumnoId)} <span style={{ color: "var(--ink-soft)", fontWeight: 400 }}>con</span> {nT(p.tutorId)}</div>
+                    <div className="meta">{fmtDias(p.dias)} · {fmtDur(p.duracion)}</div>
+                  </div>
+                  <BotonConfirma onConfirm={() => eliminar(p.id)} />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -1176,8 +1265,6 @@ function TabAnalisis({ org, mes }) {
 
   return (
     <>
-      <CalendarioMes org={org} mes={mes} />
-
       <div className="tut-stats">
         <div className="tut-stat"><div className="v">{(minTotal / 60).toFixed(1)}</div><div className="l">Horas dadas · {periodo.toLowerCase()}</div></div>
         <div className="tut-stat"><div className="v">{ses.length}</div><div className="l">Clases</div></div>
@@ -1361,7 +1448,15 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
   const gananciaAnio = org.sesiones
     .filter((s) => (s.fecha || "").startsWith(anioActual) && (!pidC || s.tutorId !== pidC) && (s.moneda || "Q") === "Q")
     .reduce((x, s) => x + (s.cobro || 0) - (s.pago || 0), 0);
-  const balance = num(conc.guardado) + gananciaAnio - debenEmpresaQ;
+  // Cuentas por pagar: lo que aún le debes a tutores en Q (sin el tutor personal ni tutorías en $).
+  // La ganancia del año ya resta el pago de esas sesiones como si estuviera pagado; si todavía no lo pagas,
+  // ese dinero sigue en el banco, así que se suma de vuelta para que el balance siga cuadrando.
+  const debesTutoresQTotal = org.tutores.filter((t) => t.id !== pidC).reduce((x, t) => {
+    const gen = org.sesiones.filter((s) => s.tutorId === t.id && (s.moneda || "Q") === "Q").reduce((ac, s) => ac + (s.pago || 0), 0);
+    const pag = org.pagos.filter((p) => p.tutorId === t.id).reduce((ac, p) => ac + (p.monto || 0), 0);
+    return x + Math.max(0, gen - pag);
+  }, 0);
+  const balance = num(conc.guardado) + gananciaAnio - debenEmpresaQ + debesTutoresQTotal;
   const diff = num(conc.banco) - balance;
   const cuadra = Math.abs(diff) < 0.005;
   const setConc = (campo, valor) => guardarOrg({ ...org, conciliacion: { ...conc, [campo]: num(valor) } });
@@ -1385,7 +1480,7 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
       {/* Conciliación: solo quetzales */}
       <div className="tut-card" style={{ marginBottom: 16 }}>
         <h2>Conciliación de caja (solo Q)</h2>
-        <p className="sub">Verifica si tu banco cuadra con lo cobrado y lo pendiente de alumnos. Las tutorías en dólares no entran aquí.</p>
+        <p className="sub">Verifica si tu banco cuadra con lo cobrado, lo pendiente de alumnos y lo pendiente de pagar a tutores. Las tutorías en dólares y las del tutor personal no entran aquí.</p>
         <div style={{ maxWidth: 460 }}>
           <div className="tut-sumrow">
             <span>Saldo guardado (inicial)</span>
@@ -1399,6 +1494,10 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
           <div className="tut-sumrow">
             <span>− Cuentas por cobrar</span>
             <span className="amt" style={{ color: "var(--neg)" }}>{fmtQ(debenEmpresaQ)}</span>
+          </div>
+          <div className="tut-sumrow">
+            <span>+ Cuentas por pagar (tutores)</span>
+            <span className="amt" style={{ color: "var(--pos)" }}>{fmtQ(debesTutoresQTotal)}</span>
           </div>
           <div className="tut-sumrow" style={{ borderTop: "1px solid var(--line)", marginTop: 6, paddingTop: 8 }}>
             <b>= Balance</b>
