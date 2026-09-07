@@ -1072,13 +1072,20 @@ function CalendarioMes({ org, mes }) {
     .filter((s) => !fAlumno || s.alumnoId === fAlumno)
     .filter((s) => !fMod || s.modalidad === fMod), [org.sesiones, mesCal, fTutor, fAlumno, fMod]);
 
+  // Todas las sesiones y cobros de ESTE mes (sin ningún filtro), para que cada caja de resumen calcule
+  // exactamente lo que le corresponde sin heredar por accidente otro filtro activo a la vez.
+  const sesionesDelMes = useMemo(() => org.sesiones.filter((s) => (s.fecha || "").startsWith(mesCal)), [org.sesiones, mesCal]);
+  const cobrosDelMes = useMemo(() => org.cobros.filter((c) => (c.fecha || "").startsWith(mesCal)), [org.cobros, mesCal]);
+
   // Caja de resumen arriba a la derecha: cambia según qué filtro está activo (tutor > alumno > modalidad > ninguno).
+  // Todo se calcula solo con datos de mesCal (el mes que se está viendo), igual que "Cuentas y pagos" en modo Mensual.
   const resumen = useMemo(() => {
     if (fTutor) {
       const t = org.tutores.find((x) => x.id === fTutor);
-      const total = sesMes.reduce((a, s) => a + (s.pago || 0), 0);
-      const pres = sesMes.filter((s) => s.modalidad === PRES).reduce((a, s) => a + (s.pago || 0), 0);
-      const lin = sesMes.filter((s) => s.modalidad === LINEA).reduce((a, s) => a + (s.pago || 0), 0);
+      const ss = sesionesDelMes.filter((s) => s.tutorId === fTutor);
+      const total = ss.reduce((a, s) => a + (s.pago || 0), 0);
+      const pres = ss.filter((s) => s.modalidad === PRES).reduce((a, s) => a + (s.pago || 0), 0);
+      const lin = ss.filter((s) => s.modalidad === LINEA).reduce((a, s) => a + (s.pago || 0), 0);
       return (
         <div className="tut-cal-resumen">
           <div className="t">{t?.nombre || "Tutor"}</div>
@@ -1091,19 +1098,19 @@ function CalendarioMes({ org, mes }) {
     }
     if (fAlumno) {
       const a = org.alumnos.find((x) => x.id === fAlumno);
-      const gen = org.sesiones.filter((s) => s.alumnoId === fAlumno).reduce((x, s) => x + (s.cobro || 0), 0);
-      const pag = org.cobros.filter((c) => c.alumnoId === fAlumno).reduce((x, c) => x + (c.monto || 0), 0);
+      const gen = sesionesDelMes.filter((s) => s.alumnoId === fAlumno).reduce((x, s) => x + (s.cobro || 0), 0);
+      const pag = cobrosDelMes.filter((c) => c.alumnoId === fAlumno).reduce((x, c) => x + (c.monto || 0), 0);
       const debe = Math.max(0, gen - pag);
       return (
         <div className="tut-cal-resumen">
           <div className="t">{a?.nombre || "Alumno"}</div>
           <div className="v">{fmtMon(debe, monAl(fAlumno))}</div>
-          <div className="l">debe en total</div>
+          <div className="l">debe en {fmtMes(mesCal)}</div>
         </div>
       );
     }
     if (fMod) {
-      const ss = sesMes.filter((s) => (s.moneda || "Q") === "Q" && (!pidCal || s.tutorId !== pidCal));
+      const ss = sesionesDelMes.filter((s) => s.modalidad === fMod && (s.moneda || "Q") === "Q" && (!pidCal || s.tutorId !== pidCal));
       const ing = ss.reduce((a, s) => a + (s.cobro || 0), 0);
       const pag = ss.reduce((a, s) => a + (s.pago || 0), 0);
       return (
@@ -1112,11 +1119,11 @@ function CalendarioMes({ org, mes }) {
           <div className="l">Te pagaron: <b>{fmtQ(ing)}</b></div>
           <div className="l">Pagaste a tutores: <b>{fmtQ(pag)}</b></div>
           <div className="v" style={{ marginTop: 4 }}>{fmtQ(ing - pag)}</div>
-          <div className="l">ganancia</div>
+          <div className="l">ganancia en {fmtMes(mesCal)}</div>
         </div>
       );
     }
-    const ss = sesMes.filter((s) => (s.moneda || "Q") === "Q" && (!pidCal || s.tutorId !== pidCal));
+    const ss = sesionesDelMes.filter((s) => (s.moneda || "Q") === "Q" && (!pidCal || s.tutorId !== pidCal));
     const ing = ss.reduce((a, s) => a + (s.cobro || 0), 0);
     const pag = ss.reduce((a, s) => a + (s.pago || 0), 0);
     return (
@@ -1125,7 +1132,7 @@ function CalendarioMes({ org, mes }) {
         <div className="l">ganancia de tutorías (Q) en {fmtMes(mesCal)}</div>
       </div>
     );
-  }, [fTutor, fAlumno, fMod, sesMes, org, pidCal, mesCal]);
+  }, [fTutor, fAlumno, fMod, sesionesDelMes, cobrosDelMes, org.tutores, org.alumnos, pidCal, mesCal]);
 
   const porDia = useMemo(() => {
     const map = new Map();
