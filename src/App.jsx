@@ -1501,6 +1501,8 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
 
   const [soloDeudores, setSoloDeudores] = useState(false);
   const [periodoFiltro, setPeriodoFiltro] = useState("mes");
+  const [verCobrar, setVerCobrar] = useState(false);
+  const [verPagar, setVerPagar] = useState(false);
   const enPeriodo = (fecha) =>
     periodoFiltro === "mes" ? (fecha || "").startsWith(mes) :
     periodoFiltro === "anio" ? (fecha || "").startsWith(mes.slice(0, 4)) : true;
@@ -1545,23 +1547,31 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
   // --- Conciliación: SOLO quetzales. Siempre datos totales, no filtrados por período. ---
   const conc = org.conciliacion || { guardado: 0, banco: 0 };
   const cobradoQ = org.cobros.filter((c) => monA(c.alumnoId) === "Q").reduce((x, c) => x + (c.monto || 0), 0);
-  const debenEmpresaQ = org.alumnos.filter((a) => (a.moneda || "Q") === "Q").reduce((x, a) => {
-    const empresaSes = org.sesiones.filter((s) => s.alumnoId === a.id && (!pidC || s.tutorId !== pidC)).reduce((ac, s) => ac + (s.cobro || 0), 0);
-    const pag = org.cobros.filter((c) => c.alumnoId === a.id).reduce((ac, c) => ac + (c.monto || 0), 0);
-    return x + Math.max(0, empresaSes - pag);
-  }, 0);
+  // Desglose de "Cuentas por cobrar": por alumno, solo lo de la empresa (sin el tutor personal), aunque sea el mismo alumno.
+  // El alumno paga un solo monto junto (sin separar a quién le toca), así que ese pago se aplica primero a lo personal
+  // (lo mío aparte, que no es ingreso de la empresa) y solo lo que sobra reduce lo que la empresa tiene pendiente de cobrar.
+  const desgloseCobrar = org.alumnos.filter((a) => (a.moneda || "Q") === "Q").map((a) => {
+    const todasSes = org.sesiones.filter((s) => s.alumnoId === a.id);
+    const empresaSes = todasSes.filter((s) => !pidC || s.tutorId !== pidC).reduce((ac, s) => ac + (s.cobro || 0), 0);
+    const personalSes = pidC ? todasSes.filter((s) => s.tutorId === pidC).reduce((ac, s) => ac + (s.cobro || 0), 0) : 0;
+    const pagTotal = org.cobros.filter((c) => c.alumnoId === a.id).reduce((ac, c) => ac + (c.monto || 0), 0);
+    const pagParaEmpresa = Math.max(0, pagTotal - personalSes);
+    return { id: a.id, nombre: a.nombre, debe: Math.max(0, empresaSes - pagParaEmpresa) };
+  }).filter((d) => d.debe > 0.005).sort((a, b) => b.debe - a.debe);
+  const debenEmpresaQ = desgloseCobrar.reduce((x, d) => x + d.debe, 0);
   const anioActual = mes.slice(0, 4);
   const gananciaAnio = org.sesiones
     .filter((s) => (s.fecha || "").startsWith(anioActual) && (!pidC || s.tutorId !== pidC) && (s.moneda || "Q") === "Q")
     .reduce((x, s) => x + (s.cobro || 0) - (s.pago || 0), 0);
-  // Cuentas por pagar: lo que aún le debes a tutores en Q (sin el tutor personal ni tutorías en $).
+  // Cuentas por pagar: lo que aún le debes a tutores en Q (sin el tutor personal ni tutorías en $), por tutor.
   // La ganancia del año ya resta el pago de esas sesiones como si estuviera pagado; si todavía no lo pagas,
   // ese dinero sigue en el banco, así que se suma de vuelta para que el balance siga cuadrando.
-  const debesTutoresQTotal = org.tutores.filter((t) => t.id !== pidC).reduce((x, t) => {
+  const desglosePagar = org.tutores.filter((t) => t.id !== pidC).map((t) => {
     const gen = org.sesiones.filter((s) => s.tutorId === t.id && (s.moneda || "Q") === "Q").reduce((ac, s) => ac + (s.pago || 0), 0);
     const pag = org.pagos.filter((p) => p.tutorId === t.id).reduce((ac, p) => ac + (p.monto || 0), 0);
-    return x + Math.max(0, gen - pag);
-  }, 0);
+    return { id: t.id, nombre: t.nombre, debe: Math.max(0, gen - pag) };
+  }).filter((d) => d.debe > 0.005).sort((a, b) => b.debe - a.debe);
+  const debesTutoresQTotal = desglosePagar.reduce((x, d) => x + d.debe, 0);
   const balance = num(conc.guardado) + gananciaAnio - debenEmpresaQ + debesTutoresQTotal;
   const diff = num(conc.banco) - balance;
   const cuadra = Math.abs(diff) < 0.005;
@@ -1597,14 +1607,32 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
             <span>+ Ganancia del año</span>
             <span className="amt" style={{ color: "var(--pos)" }}>{fmtQ(gananciaAnio)}</span>
           </div>
-          <div className="tut-sumrow">
-            <span>− Cuentas por cobrar</span>
+          <div className="tut-sumrow" style={{ cursor: desgloseCobrar.length > 0 ? "pointer" : "default" }} onClick={() => desgloseCobrar.length > 0 && setVerCobrar((v) => !v)}>
+            <span>− Cuentas por cobrar {desgloseCobrar.length > 0 && <span style={{ fontSize: 10 }}>{verCobrar ? "▾" : "▸"}</span>}</span>
             <span className="amt" style={{ color: "var(--neg)" }}>{fmtQ(debenEmpresaQ)}</span>
           </div>
-          <div className="tut-sumrow">
-            <span>+ Cuentas por pagar (tutores)</span>
+          {verCobrar && desgloseCobrar.length > 0 && (
+            <div style={{ padding: "2px 0 8px 12px" }}>
+              {desgloseCobrar.map((d) => (
+                <div key={d.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: "var(--ink-soft)", padding: "3px 0" }}>
+                  <span>{d.nombre}</span><span style={{ fontFamily: "Space Grotesk", fontVariantNumeric: "tabular-nums" }}>{fmtQ(d.debe)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="tut-sumrow" style={{ cursor: desglosePagar.length > 0 ? "pointer" : "default" }} onClick={() => desglosePagar.length > 0 && setVerPagar((v) => !v)}>
+            <span>+ Cuentas por pagar (tutores) {desglosePagar.length > 0 && <span style={{ fontSize: 10 }}>{verPagar ? "▾" : "▸"}</span>}</span>
             <span className="amt" style={{ color: "var(--pos)" }}>{fmtQ(debesTutoresQTotal)}</span>
           </div>
+          {verPagar && desglosePagar.length > 0 && (
+            <div style={{ padding: "2px 0 8px 12px" }}>
+              {desglosePagar.map((d) => (
+                <div key={d.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: "var(--ink-soft)", padding: "3px 0" }}>
+                  <span>{d.nombre}</span><span style={{ fontFamily: "Space Grotesk", fontVariantNumeric: "tabular-nums" }}>{fmtQ(d.debe)}</span>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="tut-sumrow" style={{ borderTop: "1px solid var(--line)", marginTop: 6, paddingTop: 8 }}>
             <b>= Balance</b>
             <span className="amt" style={{ fontFamily: "Space Grotesk", fontWeight: 700 }}>{fmtQ(balance)}</span>
