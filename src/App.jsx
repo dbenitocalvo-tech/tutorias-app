@@ -1547,16 +1547,23 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
   // --- Conciliación: SOLO quetzales. Siempre datos totales, no filtrados por período. ---
   const conc = org.conciliacion || { guardado: 0, banco: 0 };
   const cobradoQ = org.cobros.filter((c) => monA(c.alumnoId) === "Q").reduce((x, c) => x + (c.monto || 0), 0);
-  // Desglose de "Cuentas por cobrar": por alumno, solo lo de la empresa (sin el tutor personal), aunque sea el mismo alumno.
-  // El alumno paga un solo monto junto (sin separar a quién le toca), así que ese pago se aplica primero a lo personal
-  // (lo mío aparte, que no es ingreso de la empresa) y solo lo que sobra reduce lo que la empresa tiene pendiente de cobrar.
+  // Desglose de "Cuentas por cobrar": por alumno, SOLO lo de la empresa (sin el tutor personal), aunque sea el mismo alumno.
+  // El alumno paga de corrido, sin separar a quién le toca cada pago, así que el dinero que paga se aplica en orden
+  // cronológico a sus clases más viejas primero (como en la vida real), sean de quien sean. Lo que quede sin cubrir,
+  // si es de otro tutor (no personal), es lo que la empresa todavía tiene pendiente de cobrar.
   const desgloseCobrar = org.alumnos.filter((a) => (a.moneda || "Q") === "Q").map((a) => {
-    const todasSes = org.sesiones.filter((s) => s.alumnoId === a.id);
-    const empresaSes = todasSes.filter((s) => !pidC || s.tutorId !== pidC).reduce((ac, s) => ac + (s.cobro || 0), 0);
-    const personalSes = pidC ? todasSes.filter((s) => s.tutorId === pidC).reduce((ac, s) => ac + (s.cobro || 0), 0) : 0;
-    const pagTotal = org.cobros.filter((c) => c.alumnoId === a.id).reduce((ac, c) => ac + (c.monto || 0), 0);
-    const pagParaEmpresa = Math.max(0, pagTotal - personalSes);
-    return { id: a.id, nombre: a.nombre, debe: Math.max(0, empresaSes - pagParaEmpresa) };
+    const sesOrdenadas = org.sesiones.filter((s) => s.alumnoId === a.id)
+      .sort((x, y) => (x.fecha || "").localeCompare(y.fecha || "") || (x.subidaEn || 0) - (y.subidaEn || 0));
+    let restante = org.cobros.filter((c) => c.alumnoId === a.id).reduce((x, c) => x + (c.monto || 0), 0);
+    let debe = 0;
+    sesOrdenadas.forEach((s) => {
+      const cobro = s.cobro || 0;
+      const cubierto = Math.min(restante, cobro);
+      restante -= cubierto;
+      if (pidC && s.tutorId === pidC) return; // lo personal nunca entra a esta cuenta
+      debe += cobro - cubierto;
+    });
+    return { id: a.id, nombre: a.nombre, debe };
   }).filter((d) => d.debe > 0.005).sort((a, b) => b.debe - a.debe);
   const debenEmpresaQ = desgloseCobrar.reduce((x, d) => x + d.debe, 0);
   const anioActual = mes.slice(0, 4);
@@ -1596,7 +1603,7 @@ function TabCuentas({ org, guardarOrg, showToast, mes }) {
       {/* Conciliación: solo quetzales */}
       <div className="tut-card" style={{ marginBottom: 16 }}>
         <h2>Conciliación de caja (solo Q)</h2>
-        <p className="sub">Verifica si tu banco cuadra con lo cobrado, lo pendiente de alumnos y lo pendiente de pagar a tutores. Las tutorías en dólares y las del tutor personal no entran aquí.</p>
+        <p className="sub">Verifica si tu banco cuadra con lo cobrado, lo pendiente de alumnos y lo pendiente de pagar a tutores. Las tutorías en dólares y las del tutor personal no entran aquí. "Cuentas por cobrar" y "por pagar" son el histórico completo (no solo del mes/año que tengas elegido arriba), porque la conciliación necesita ver todo lo que sigue pendiente desde siempre.</p>
         <div style={{ maxWidth: 460 }}>
           <div className="tut-sumrow">
             <span>Saldo guardado (inicial)</span>
